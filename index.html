@@ -53,6 +53,13 @@
     backdrop-filter:blur(6px);letter-spacing:.5px}
   #modeBtn:active{transform:scale(.95)}
 
+  #fsBtn{position:fixed;top:12px;right:120px;z-index:30;
+    background:rgba(20,20,30,.75);color:#cfe3ff;border:1px solid rgba(120,160,255,.5);
+    border-radius:10px;padding:8px 12px;font-size:15px;font-weight:700;cursor:pointer;
+    backdrop-filter:blur(6px);letter-spacing:.5px;width:42px;height:38px}
+  #fsBtn:active{transform:scale(.95)}
+  @media (max-width:480px){#fsBtn{right:104px;padding:6px 10px;font-size:14px;height:34px;width:38px}}
+
   #joy{position:fixed;left:24px;bottom:24px;width:130px;height:130px;border-radius:50%;
     background:radial-gradient(circle,rgba(80,120,200,.12),rgba(80,120,200,.03) 70%,transparent);
     border:2px solid rgba(140,180,255,.25);z-index:15;display:none;touch-action:none}
@@ -75,6 +82,24 @@
   #mobJump{background:rgba(60,90,160,.6)!important}
   #mobSprint{background:rgba(140,60,40,.55)!important}
   #mobInteract{background:rgba(90,140,60,.6)!important;font-size:24px!important}
+
+  /* Заставка — исчезает сама через CSS */
+  #splash{position:fixed;inset:0;z-index:60;background:#000;
+    display:flex;align-items:center;justify-content:center;flex-direction:column;
+    pointer-events:none;
+    animation:splashAutoHide 0.8s ease 3.2s forwards}
+  @keyframes splashAutoHide{
+    0%{opacity:1;visibility:visible}
+    99%{opacity:0;visibility:visible}
+    100%{opacity:0;visibility:hidden}
+  }
+  #splash img{width:min(38vh,38vw);height:auto;
+    filter:drop-shadow(0 0 30px rgba(255,60,60,.55));
+    animation:splashIn 1.2s ease}
+  #splash .splash-text{margin-top:24px;font-size:clamp(20px,4vw,38px);font-weight:700;
+    letter-spacing:5px;color:#ffdcdc;text-shadow:0 0 24px #f44,0 0 8px #fff;
+    animation:splashIn 1.6s ease}
+  @keyframes splashIn{0%{opacity:0;transform:scale(.85)}100%{opacity:1;transform:scale(1)}}
 
   #hint{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
     flex-direction:column;background:radial-gradient(circle at 50% 40%,#181018,#000 72%);
@@ -129,6 +154,11 @@
 </head>
 <body>
 
+<div id="splash">
+  <img src="https://static-algoritmika-org.ngcdn.ru/uploads/community/avatar/svg/70492408_1789827889.svg?t=1789827889" alt="logo">
+  <div class="splash-text">By — Всеволод</div>
+</div>
+
 <canvas id="c"></canvas>
 <div id="vig"></div>
 <div id="cross"></div>
@@ -141,6 +171,7 @@
 <div id="msg"></div>
 <div id="fade"></div>
 
+<button id="fsBtn">⛶</button>
 <button id="modeBtn">🖥️ PC</button>
 
 <div id="joy"><div id="joyKnob"></div></div>
@@ -155,7 +186,7 @@
   <h1>КОТ</h1>
   <div class="sub">ПРОЕКТ 2</div>
   <p id="ctrlHint">WASD — ходьба, <span class="k">Shift</span> — бег, <span class="k">Пробел</span> — прыжок</p>
-  <p>Мышь — обзор, <span class="k">F</span> — фонарик, <span class="k">E</span> — взять/открыть</p>
+  <p>Мышь — обзор, <span class="k">F</span> — фонарик, <span class="k">E</span> / <span class="k">ЛКМ</span> — взять/открыть</p>
   <p>Найди путь через 15 комнат. Береги фонарик — батарея садится.</p>
   <div class="go">▶ НАЖМИ, ЧТОБЫ НАЧАТЬ</div>
 </div>
@@ -210,7 +241,7 @@ var TOTAL_LEVELS = 15;
 var SPRINT_DRAIN = 0.35;
 var SPRINT_REGEN = 0.18;
 var BATT_DRAIN = 0.006;
-var BATT_REGEN = 0.001; // +1% за 10 секунд, когда выключен
+var BATT_REGEN = 0.001;
 
 var isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 var isSmallScreen = Math.min(window.innerWidth, window.innerHeight) < 820;
@@ -1041,6 +1072,32 @@ function showMsg(text, dur, cls){
 }
 
 /* =========================================================
+   ПОЛНОЭКРАННЫЙ РЕЖИМ
+   ========================================================= */
+function toggleFullscreen(){
+  if(!document.fullscreenElement && !document.webkitFullscreenElement){
+    var el = document.documentElement;
+    if(el.requestFullscreen) el.requestFullscreen().catch(function(){});
+    else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    else if(el.msRequestFullscreen) el.msRequestFullscreen();
+  } else {
+    if(document.exitFullscreen) document.exitFullscreen();
+    else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+    else if(document.msExitFullscreen) document.msExitFullscreen();
+  }
+}
+function tryFullscreen(){
+  var el = document.documentElement;
+  if(document.fullscreenElement || document.webkitFullscreenElement) return;
+  if(el.requestFullscreen) el.requestFullscreen().catch(function(){});
+  else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+}
+document.getElementById('fsBtn').addEventListener('click', function(e){
+  e.stopPropagation();
+  toggleFullscreen();
+});
+
+/* =========================================================
    УПРАВЛЕНИЕ: PC
    ========================================================= */
 document.addEventListener('keydown', function(e){
@@ -1063,12 +1120,18 @@ document.addEventListener('mousemove', function(e){
   player.pitch -= e.movementY * 0.0022;
   clampPitch();
 });
-canvas.addEventListener('click', function(){
+
+// ЛКМ = взаимодействие + захват мыши
+canvas.addEventListener('mousedown', function(e){
   if(ctrlMode !== 'pc') return;
-  if(state === 'play' && document.pointerLockElement !== canvas){
+  if(state !== 'play') return;
+  if(document.pointerLockElement !== canvas){
     if(canvas.requestPointerLock) canvas.requestPointerLock();
+    return;
   }
+  if(e.button === 0) interact();
 });
+
 function clampPitch(){
   var lim = Math.PI / 2 - 0.05;
   if(player.pitch >  lim) player.pitch =  lim;
@@ -1092,7 +1155,7 @@ function setCtrlMode(mode){
   var ch = document.getElementById('ctrlHint');
   if(ch){
     ch.innerHTML = (mode === 'pc')
-      ? 'WASD — ходьба, <span class="k">Shift</span> — бег, <span class="k">Пробел</span> — прыжок'
+      ? 'WASD — ходьба, <span class="k">Shift</span> — бег, <span class="k">Пробел</span> — прыжок, <span class="k">ЛКМ</span> / <span class="k">E</span> — взаимодействие'
       : '<span class="k">Джойстик</span> слева — ходьба, <span class="k">свайп</span> справа — обзор, кнопки справа — E / прыжок / бег';
   }
   if(mode === 'mobile'){
@@ -2138,7 +2201,6 @@ function startLevel(n){
 
   if(LEVELS[n]) LEVELS[n]();
 
-  // сохраняем базовую яркость этого уровня
   baseAmbient = ambient.intensity;
   baseHemi = hemi.intensity;
   baseTorch = torch.intensity;
@@ -2170,7 +2232,6 @@ function nextLevel(){
 function update(dt){
   timeAcc += dt;
 
-  // --- движение игрока ---
   var fx = 0, fz = 0;
   var wantSprint = false;
   if(ctrlMode === 'pc'){
@@ -2213,7 +2274,6 @@ function update(dt){
     if(player.bobAmount < 0.005) player.bobAmount = 0;
   }
 
-  // --- гравитация / прыжок ---
   player.vy += GRAVITY * dt;
   player.y += player.vy * dt;
   var groundY = groundHeightAt(player.x, player.z);
@@ -2226,7 +2286,6 @@ function update(dt){
   }
   if(player.y < -5) player.y = 0;
 
-  // --- камера ---
   var bobY = Math.sin(player.bobPhase * 2) * player.bobAmount;
   var bobX = Math.cos(player.bobPhase) * player.bobAmount * 0.5;
   var roll = Math.cos(player.bobPhase) * player.bobAmount * 0.15;
@@ -2240,7 +2299,6 @@ function update(dt){
   camera.rotation.x = player.pitch;
   camera.rotation.z = roll;
 
-  // --- кот 3-е лицо ---
   if(catModel){
     catModel.visible = player.thirdPerson;
     catModel.position.set(player.x, player.y + EYE_HEIGHT - 1.5, player.z);
@@ -2253,7 +2311,6 @@ function update(dt){
     pawsModel.rotation.x = Math.sin(player.bobPhase) * player.bobAmount * 0.2;
   }
 
-  // --- фонарик: разряд / реген ---
   var flashlightActive = flashOn && battery > 0;
   if(flashlightActive){
     battery = Math.max(0, battery - BATT_DRAIN * dt);
@@ -2264,7 +2321,6 @@ function update(dt){
       flashlightActive = false;
     }
   } else {
-    // когда выключен — медленно заряжается: +1% каждые 10 секунд
     battery = Math.min(1, battery + BATT_REGEN * dt);
   }
   var flick = 1
@@ -2278,13 +2334,12 @@ function update(dt){
   }
   flashLight.visible = flashlightActive;
 
-  // --- затемнение сцены, когда фонарик выключен ---
   var darkMul = flashlightActive ? 1.0 : 0.2;
   ambient.intensity = baseAmbient * darkMul;
   hemi.intensity    = baseHemi    * darkMul;
   torch.intensity   = baseTorch   * (flashlightActive ? 1.0 : 0.3);
 
-  // --- авто-подбор ключей и батареек ---
+  // авто-подбор ключей и батареек
   if(state === 'play'){
     for(var ai = 0; ai < interactables.length; ai++){
       var objA = interactables[ai];
@@ -2315,7 +2370,6 @@ function update(dt){
 
   updateHUD();
 
-  // --- анимация интерактивов ---
   for(var i = 0; i < interactables.length; i++){
     var o = interactables[i];
     if(o.userData.taken) continue;
@@ -2338,7 +2392,6 @@ function update(dt){
     }
   }
 
-  // --- двери ---
   for(var j = 0; j < dynamicObjs.length; j++){
     var obj = dynamicObjs[j];
     if(obj.type === 'door'){
@@ -2364,7 +2417,6 @@ function update(dt){
     }
   }
 
-  // --- толкание ящиков ---
   if(state === 'play'){
     for(var pi = 0; pi < dynamicObjs.length; pi++){
       var pb = dynamicObjs[pi];
@@ -2404,7 +2456,6 @@ function update(dt){
     }
   }
 
-  // --- открытие двери по ключу ---
   for(var m = 0; m < dynamicObjs.length; m++){
     var dd = dynamicObjs[m];
     if(dd.type !== 'door') continue;
@@ -2427,7 +2478,6 @@ function update(dt){
     }
   }
 
-  // --- дверь уровня 11 (по таймеру) ---
   if(level === 11 && l11DoorRef && !l11DoorRef.open && l11Active){
     var dd11 = Math.hypot(player.x - l11DoorRef.x, player.z - l11DoorRef.z);
     if(dd11 < 2.5){
@@ -2440,7 +2490,6 @@ function update(dt){
     }
   }
 
-  // --- спец-механики ---
   checkSymbolTreads();
   updateTimer11(dt);
   updateLasers(dt);
@@ -2481,6 +2530,7 @@ document.getElementById('hint').addEventListener('click', function(){
   scheduleDrip();
   scheduleCreep();
   setCtrlMode(ctrlMode);
+  tryFullscreen();
   if(ctrlMode === 'pc' && canvas.requestPointerLock) canvas.requestPointerLock();
   initGame();
 });
