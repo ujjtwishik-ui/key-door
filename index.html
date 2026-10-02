@@ -2344,7 +2344,8 @@ function update(dt){
   hemi.intensity    = baseHemi    * darkMul;
   torch.intensity   = baseTorch   * (flashlightActive ? 1.0 : 0.3);
 
-  if(state === 'play'){
+   if(state === 'play'){
+    // === ТОЛКАНИЕ ЯЩИКОВ ===
     for(var pi = 0; pi < dynamicObjs.length; pi++){
       var pb = dynamicObjs[pi];
       if(pb.type !== 'pushbox') continue;
@@ -2386,6 +2387,52 @@ function update(dt){
     }
     // проверка плит каждый кадр, а не только при толкании
     if(level === 8) checkPlates();
+
+    // === АВТО-ПОДБОР КЛЮЧЕЙ И БАТАРЕЕК (с магнитом) ===
+    for(var ai = 0; ai < interactables.length; ai++){
+      var objA = interactables[ai];
+      if(objA.userData.taken) continue;
+      var typA = objA.userData.type;
+      if(typA !== 'key' && typA !== 'battery') continue;
+
+      var ddx = objA.position.x - player.x;
+      var ddz = objA.position.z - player.z;
+      var ddy = objA.position.y - (player.y + EYE_HEIGHT * 0.5);
+      // горизонтальное расстояние — по X/Z важнее, чем по высоте
+      var distH = Math.sqrt(ddx*ddx + ddz*ddz);
+      var totalD = Math.sqrt(ddx*ddx + ddz*ddz + ddy*ddy * 0.4);
+
+      // МАГНИТ: если горизонтально < 2.5 и по высоте < 2.0 → подтягиваем
+      var magnet = (distH < 2.5 && Math.abs(ddy) < 2.0);
+      // ПОДБОР: если суммарно < 2.2 → берём
+      var pickUp = (totalD < 2.2);
+
+      if(magnet && !pickUp){
+        // плавно тянем объект к игроку
+        var pull = 0.15;
+        objA.position.x -= ddx * pull;
+        objA.position.z -= ddz * pull;
+        // подтягиваем по высоте к уровню груди
+        var targetY = player.y + EYE_HEIGHT * 0.6;
+        objA.position.y += (targetY - objA.position.y) * pull;
+      }
+
+      if(pickUp){
+        objA.userData.taken = true;
+        objA.visible = false;
+        if(typA === 'key'){
+          inventory.keys[objA.userData.id] = true;
+          showMsg('🔑 Ключ найден!', 1.8, 'good');
+          beep(1100, 0.06, 0.08);
+          setTimeout(function(){ beep(1600, 0.1, 0.08); }, 70);
+        } else {
+          inventory.batteries++;
+          battery = Math.min(1, battery + 0.5);
+          showMsg('🔋 +50% заряда', 1.8, 'good');
+          beep(700, 0.08, 0.07, 'sine');
+        }
+      }
+    }
   }
 
   updateHUD();
