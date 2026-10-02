@@ -2344,33 +2344,48 @@ function update(dt){
   hemi.intensity    = baseHemi    * darkMul;
   torch.intensity   = baseTorch   * (flashlightActive ? 1.0 : 0.3);
 
-  // авто-подбор ключей и батареек
   if(state === 'play'){
-    for(var ai = 0; ai < interactables.length; ai++){
-      var objA = interactables[ai];
-      if(objA.userData.taken) continue;
-      var typA = objA.userData.type;
-      if(typA !== 'key' && typA !== 'battery') continue;
-      var ddx = objA.position.x - player.x;
-      var ddz = objA.position.z - player.z;
-      var ddy = objA.position.y - (player.y + EYE_HEIGHT);
-      var ddist = Math.sqrt(ddx*ddx + ddz*ddz + ddy*ddy*0.5);
-      if(ddist < 1.7){
-        objA.userData.taken = true;
-        objA.visible = false;
-        if(typA === 'key'){
-          inventory.keys[objA.userData.id] = true;
-          showMsg('🔑 Ключ найден', 1.8, 'good');
-          beep(1100, 0.06, 0.08);
-          setTimeout(function(){ beep(1600, 0.1, 0.08); }, 70);
+    for(var pi = 0; pi < dynamicObjs.length; pi++){
+      var pb = dynamicObjs[pi];
+      if(pb.type !== 'pushbox') continue;
+      var box = pb.data;
+      var sz = box.userData.size;
+      var bx = box.position.x, bz = box.position.z;
+      var dx2 = player.x - bx;
+      var dz2 = player.z - bz;
+      var dist2 = Math.hypot(dx2, dz2);
+      // чуть больше, чем радиус игрока + половина ящика,
+      // иначе игрок упирается в коллайдер и не может подойти достаточно близко
+      var minDist = sz + PLAYER_R + 0.25;
+      if(dist2 < minDist && dist2 > 0.01){
+        // толкаем ящик от игрока
+        var overlap = minDist - dist2;
+        var push = overlap * 0.5;  // мягче, чтобы не телепортировало
+        var nx = bx - (dx2 / dist2) * push;
+        var nz = bz - (dz2 / dist2) * push;
+        var col = box.userData.col;
+        var oldX1 = col.x1, oldZ1 = col.z1, oldX2 = col.x2, oldZ2 = col.z2;
+        col.x1 = nx - sz; col.z1 = nz - sz;
+        col.x2 = nx + sz; col.z2 = nz + sz;
+        var collide = false;
+        for(var ci = 0; ci < colliders.length; ci++){
+          if(colliders[ci] === col) continue;
+          var c2 = colliders[ci];
+          if(col.x1 < c2.x2 && col.x2 > c2.x1 && col.z1 < c2.z2 && col.z2 > c2.z1){
+            collide = true; break;
+          }
+        }
+        if(!collide){
+          box.position.x = nx;
+          box.position.z = nz;
         } else {
-          inventory.batteries++;
-          battery = Math.min(1, battery + 0.5);
-          showMsg('🔋 +50% заряда', 1.8, 'good');
-          beep(700, 0.08, 0.07, 'sine');
+          col.x1 = oldX1; col.z1 = oldZ1;
+          col.x2 = oldX2; col.z2 = oldZ2;
         }
       }
     }
+    // проверка плит каждый кадр, а не только при толкании
+    if(level === 8) checkPlates();
   }
 
   updateHUD();
