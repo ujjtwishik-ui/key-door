@@ -65,7 +65,6 @@
     color:rgba(200,220,255,.55);text-align:right;pointer-events:none;display:none;
     text-shadow:0 0 6px #000;letter-spacing:.5px;line-height:1.4}
 
-  /* мобильные кнопки действий */
   #mobActions{position:fixed;right:20px;bottom:30px;z-index:16;display:none;
     flex-direction:column;gap:12px;align-items:center}
   #mobActions button{width:70px;height:70px;border-radius:50%;font-size:22px;font-weight:700;
@@ -75,6 +74,7 @@
   #mobActions button:active{transform:scale(.92);background:rgba(70,100,180,.7)}
   #mobJump{background:rgba(60,90,160,.6)!important}
   #mobSprint{background:rgba(140,60,40,.55)!important}
+  #mobInteract{background:rgba(90,140,60,.6)!important;font-size:24px!important}
 
   #hint{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
     flex-direction:column;background:radial-gradient(circle at 50% 40%,#181018,#000 72%);
@@ -89,20 +89,6 @@
     animation:pulse 1.2s infinite}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
 
-  /* заставка */
-  #splash{position:fixed;inset:0;z-index:60;background:#000;
-    display:flex;align-items:center;justify-content:center;flex-direction:column;
-    transition:opacity 1s ease;pointer-events:none}
-  #splash.hide{opacity:0}
-  #splash img{width:min(38vh,38vw);height:auto;
-    filter:drop-shadow(0 0 30px rgba(255,60,60,.55));
-    animation:splashIn 1.2s ease}
-  #splash .splash-text{margin-top:24px;font-size:clamp(20px,4vw,38px);font-weight:700;
-    letter-spacing:5px;color:#ffdcdc;text-shadow:0 0 24px #f44,0 0 8px #fff;
-    animation:splashIn 1.6s ease}
-  @keyframes splashIn{0%{opacity:0;transform:scale(.85)}100%{opacity:1;transform:scale(1)}}
-
-  /* скример */
   #scare{position:fixed;inset:0;z-index:100;display:none;align-items:center;justify-content:center;
     flex-direction:column;background:#000;overflow:hidden;animation:bgflash .09s infinite}
   #scare.on{display:flex}
@@ -137,17 +123,11 @@
   #hang .spin{display:inline-block;margin-right:10px;animation:sp 1s linear infinite}
   @keyframes sp{to{transform:rotate(360deg)}}
 
-  /* затемнение по краям (vignette) */
   #vig{position:fixed;inset:0;z-index:8;pointer-events:none;
     background:radial-gradient(circle at 50% 50%,transparent 45%,rgba(0,0,0,.75) 100%)}
 </style>
 </head>
 <body>
-
-<div id="splash">
-  <img src="https://static-algoritmika-org.ngcdn.ru/uploads/community/avatar/svg/70492408_1789827889.svg?t=1789827889" alt="logo">
-  <div class="splash-text">By — Всеволод</div>
-</div>
 
 <canvas id="c"></canvas>
 <div id="vig"></div>
@@ -166,6 +146,7 @@
 <div id="joy"><div id="joyKnob"></div></div>
 <div class="hint-tap" id="lookHint">Свайп справа — обзор</div>
 <div id="mobActions">
+  <button id="mobInteract">E</button>
   <button id="mobJump">⤒</button>
   <button id="mobSprint">»</button>
 </div>
@@ -226,9 +207,10 @@ var RUN_SPEED = 7.0;
 var EYE_HEIGHT = 1.55;
 var PLAYER_R = 0.4;
 var TOTAL_LEVELS = 15;
-var SPRINT_DRAIN = 0.35;   // в секунду
+var SPRINT_DRAIN = 0.35;
 var SPRINT_REGEN = 0.18;
-var BATT_DRAIN = 0.006;    // в секунду
+var BATT_DRAIN = 0.006;
+var BATT_REGEN = 0.001; // +1% за 10 секунд, когда выключен
 
 var isTouchDevice = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
 var isSmallScreen = Math.min(window.innerWidth, window.innerHeight) < 820;
@@ -269,7 +251,6 @@ var torch = new THREE.PointLight(0xffe0b0, 1.0, 30, 1.8);
 torch.position.set(0, 4, 0);
 scene.add(torch);
 
-// фонарик — SpotLight с тенью
 var flashLight = new THREE.SpotLight(0xfff0cc, 1.8, 24, Math.PI / 4.5, 0.55, 1.5);
 flashLight.position.set(0.25, -0.12, 0.05);
 flashLight.target.position.set(0, -0.2, -1);
@@ -290,7 +271,7 @@ window.addEventListener('resize', function(){
 });
 
 /* =========================================================
-   ПРОЦЕДУРНЫЕ ТЕКСТУРЫ (без растяжения — под каждый меш свой repeat)
+   ТЕКСТУРЫ
    ========================================================= */
 function noise(x, y){
   var n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
@@ -344,6 +325,10 @@ function makeTex(kind, size){
         r = 72 + n1 * 40 + n3 * 20;
         g = 70 + n2 * 38 + n3 * 18;
         b = 68 + n1 * 36 + n3 * 16;
+      } else if(kind === 'blood'){
+        var bl = n1 > 0.35 ? 1 : 0;
+        if(bl){ r = 110 + n2 * 60; g = 8 + n1 * 16; b = 10 + n2 * 16; }
+        else  { r = 40 + n1 * 25; g = 40 + n2 * 22; b = 48 + n1 * 18; }
       } else {
         r = g = b = n1 * 255;
       }
@@ -364,10 +349,10 @@ var TEX_BASE = {
   metal:    makeTex('metal'),
   rust:     makeTex('rust'),
   tile:     makeTex('tile'),
-  stone:    makeTex('stone')
+  stone:    makeTex('stone'),
+  blood:    makeTex('blood')
 };
 
-// фабрика материала — texture scale задается в метрах на 1 повтор текстуры
 function makeMat(kind, tint, texScale, extras){
   texScale = texScale || 2.0;
   var base = TEX_BASE[kind] || TEX_BASE.concrete;
@@ -385,560 +370,11 @@ function makeMat(kind, tint, texScale, extras){
   return mat;
 }
 
-// правильное повторение текстуры на плоскости w×h
 function scaleTexOn(mat, w, h){
   var s = mat.userData.texScale || 2.0;
   mat.map.repeat.set(Math.max(1, w / s), Math.max(1, h / s));
   mat.map.needsUpdate = true;
   return mat;
-}
-
-/* =========================================================
-   ПЕРСОНАЖ-КОТ (3D)
-   ========================================================= */
-var catModel = null;
-var catParts = {};
-
-function buildCatModel(){
-  var g = new THREE.Group();
-
-  // цвета из референса
-  var RED     = 0xc41e1e;
-  var DARKRED = 0x7a0a0a;
-  var PINK    = 0xff4444;
-  var WHITE   = 0xfff8f0;
-  var BLACK   = 0x101010;
-
-  var mRed    = new THREE.MeshStandardMaterial({ color: RED, roughness: 0.6, metalness: 0.05 });
-  var mDark   = new THREE.MeshStandardMaterial({ color: DARKRED, roughness: 0.6, metalness: 0.05 });
-  var mPink   = new THREE.MeshStandardMaterial({ color: PINK, emissive: 0x440000, emissiveIntensity: 0.5, roughness: 0.4 });
-  var mWhite  = new THREE.MeshStandardMaterial({ color: WHITE, roughness: 0.5 });
-  var mBlack  = new THREE.MeshStandardMaterial({ color: BLACK, roughness: 0.4 });
-
-  // голова
-  var head = new THREE.Mesh(new THREE.SphereGeometry(0.55, 24, 20), mRed);
-  head.scale.set(1.05, 1.0, 0.95);
-  head.position.y = 0;
-  g.add(head);
-
-  // уши
-  var earGeo = new THREE.ConeGeometry(0.22, 0.42, 4);
-  var earL = new THREE.Mesh(earGeo, mRed);
-  earL.position.set(-0.32, 0.55, 0);
-  earL.rotation.z = -0.15;
-  earL.rotation.y = Math.PI / 4;
-  g.add(earL);
-  var earR = earL.clone();
-  earR.position.x = 0.32;
-  earR.rotation.z = 0.15;
-  earR.rotation.y = Math.PI / 4;
-  g.add(earR);
-
-  // внутренняя часть уха
-  var innerGeo = new THREE.ConeGeometry(0.12, 0.26, 4);
-  var innerL = new THREE.Mesh(innerGeo, mDark);
-  innerL.position.set(-0.32, 0.55, 0.06);
-  innerL.rotation.z = -0.15;
-  innerL.rotation.y = Math.PI / 4;
-  g.add(innerL);
-  var innerR = innerL.clone();
-  innerR.position.x = 0.32;
-  innerR.rotation.z = 0.15;
-  g.add(innerR);
-
-  // глаза — большие красные овалы
-  var eyeGeo = new THREE.SphereGeometry(0.17, 20, 16);
-  var eyeL = new THREE.Mesh(eyeGeo, mPink);
-  eyeL.scale.set(0.9, 1.25, 0.5);
-  eyeL.position.set(-0.22, 0.06, 0.47);
-  g.add(eyeL);
-  var eyeR = eyeL.clone();
-  eyeR.position.x = 0.22;
-  g.add(eyeR);
-
-  // зрачки (тёмные точки)
-  var pupilGeo = new THREE.SphereGeometry(0.06, 12, 12);
-  var pupilL = new THREE.Mesh(pupilGeo, mBlack);
-  pupilL.position.set(-0.22, 0.04, 0.55);
-  pupilL.scale.set(1, 1.5, 0.4);
-  g.add(pupilL);
-  var pupilR = pupilL.clone();
-  pupilR.position.x = 0.22;
-  g.add(pupilR);
-
-  // нос
-  var nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 10), mBlack);
-  nose.position.set(0, -0.08, 0.55);
-  nose.scale.set(1.3, 0.9, 0.8);
-  g.add(nose);
-
-  // улыбка — большой рот
-  var mouth = new THREE.Mesh(
-    new THREE.SphereGeometry(0.32, 20, 16, 0, Math.PI * 2, 0.35, Math.PI * 0.55),
-    mDark
-  );
-  mouth.position.set(0, -0.18, 0.42);
-  mouth.rotation.x = -0.1;
-  g.add(mouth);
-
-  // зубы
-  var teethGeo = new THREE.BoxGeometry(0.12, 0.06, 0.04);
-  var t1 = new THREE.Mesh(teethGeo, mWhite); t1.position.set(0, -0.28, 0.58); g.add(t1);
-  var t2 = t1.clone(); t2.position.x = -0.14; t2.position.y = -0.26; g.add(t2);
-  var t3 = t1.clone(); t3.position.x = 0.14;  t3.position.y = -0.26; g.add(t3);
-
-  // усы
-  var whiskGeo = new THREE.CylinderGeometry(0.008, 0.005, 0.35, 4);
-  var whiskMat = mBlack;
-  function whisk(sx, sy){
-    var w = new THREE.Mesh(whiskGeo, whiskMat);
-    w.position.set(sx * 0.42, sy, 0.5);
-    w.rotation.z = Math.PI / 2 + sy * 0.6;
-    w.rotation.y = sx * 0.2;
-    g.add(w);
-  }
-  whisk(-1, 0.12); whisk(-1, -0.02); whisk(-1, -0.14);
-  whisk( 1, 0.12); whisk( 1, -0.02); whisk( 1, -0.14);
-
-  // тело (торс)
-  var body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.5, 8, 16), mRed);
-  body.position.set(0, -1.0, 0);
-  g.add(body);
-
-  // хвост
-  var tailCurve = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0.25, -1.15, -0.15),
-    new THREE.Vector3(0.55, -1.05, -0.35),
-    new THREE.Vector3(0.75, -0.75, -0.35),
-    new THREE.Vector3(0.75, -0.45, -0.15)
-  ]);
-  var tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 20, 0.06, 8, false), mRed);
-  g.add(tail);
-
-  // руки/лапы (передние)
-  var armGeo = new THREE.CapsuleGeometry(0.09, 0.42, 6, 12);
-  var armL = new THREE.Mesh(armGeo, mRed);
-  armL.position.set(-0.42, -1.02, 0.1);
-  armL.rotation.x = 0.4;
-  armL.rotation.z = 0.3;
-  g.add(armL);
-  var armR = armL.clone();
-  armR.position.x = 0.42;
-  armR.rotation.z = -0.3;
-  g.add(armR);
-
-  // кисти-лапки
-  var pawGeo = new THREE.SphereGeometry(0.13, 12, 10);
-  var pawL = new THREE.Mesh(pawGeo, mRed);
-  pawL.position.set(-0.55, -0.78, 0.32);
-  g.add(pawL);
-  var pawR = pawL.clone();
-  pawR.position.x = 0.55;
-  g.add(pawR);
-
-  // ноги (для теней — если будет 3-е лицо, но у нас 1-е — просто для полноты)
-  var legGeo = new THREE.CapsuleGeometry(0.1, 0.35, 6, 12);
-  var legL = new THREE.Mesh(legGeo, mRed);
-  legL.position.set(-0.22, -1.55, 0);
-  g.add(legL);
-  var legR = legL.clone();
-  legR.position.x = 0.22;
-  g.add(legR);
-
-  // ступни
-  var footGeo = new THREE.SphereGeometry(0.14, 12, 10);
-  var footL = new THREE.Mesh(footGeo, mDark);
-  footL.position.set(-0.22, -1.75, 0.06);
-  footL.scale.set(1, 0.7, 1.4);
-  g.add(footL);
-  var footR = footL.clone();
-  footR.position.x = 0.22;
-  g.add(footR);
-
-  // мягкая подсветка у ног, чтобы модель читалась в темноте
-  var glow = new THREE.PointLight(0xff5555, 0.35, 3.5, 2);
-  glow.position.set(0, -0.4, 0.4);
-  g.add(glow);
-
-  g.visible = false; // по умолчанию скрыт, покажем в 3-м лице
-  return g;
-}
-
-// "руки" кота перед камерой (для 1-го лица) — две лапки снизу экрана
-function buildFirstPersonPaws(){
-  var g = new THREE.Group();
-  var mRed = new THREE.MeshStandardMaterial({ color: 0xc41e1e, roughness: 0.6 });
-  var mDark = new THREE.MeshStandardMaterial({ color: 0x7a0a0a, roughness: 0.6 });
-
-  var geo = new THREE.CapsuleGeometry(0.055, 0.22, 6, 10);
-
-  var handL = new THREE.Mesh(geo, mRed);
-  handL.position.set(-0.32, -0.32, -0.55);
-  handL.rotation.set(-0.4, 0.2, 0.15);
-  g.add(handL);
-
-  var handR = new THREE.Mesh(geo, mRed);
-  handR.position.set( 0.32, -0.32, -0.55);
-  handR.rotation.set(-0.4, -0.2, -0.15);
-  g.add(handR);
-
-  // кисти
-  var pg = new THREE.SphereGeometry(0.08, 10, 8);
-  var pL = new THREE.Mesh(pg, mDark);
-  pL.position.set(-0.34, -0.46, -0.72);
-  g.add(pL);
-  var pR = new THREE.Mesh(pg, mDark);
-  pR.position.set( 0.34, -0.46, -0.72);
-  g.add(pR);
-
-  return g;
-}
-
-var pawsModel = null;
-
-/* =========================================================
-   ПОСТРОЙКА ГЕОМЕТРИИ УРОВНЯ
-   ========================================================= */
-var colliders = [];       // {x1,z1,x2,z2, topY}
-var interactables = [];   // объекты для взаимодействия (E)
-var dynamicObjs = [];     // анимированные каждый кадр
-
-function clearWorld(){
-  for(var i = world.children.length - 1; i >= 0; i--){
-    var o = world.children[i];
-    world.remove(o);
-    o.traverse(function(c){
-      if(c.geometry) c.geometry.dispose();
-      if(c.material){
-        var arr = Array.isArray(c.material) ? c.material : [c.material];
-        arr.forEach(function(m){
-          if(m.map && m.map.dispose) m.map.dispose();
-          m.dispose();
-        });
-      }
-    });
-  }
-  colliders = [];
-  interactables = [];
-  dynamicObjs = [];
-}
-
-function addCollider(x, z, w, d, topY){
-  colliders.push({ x1: x - w/2, z1: z - d/2, x2: x + w/2, z2: z + d/2, topY: topY === undefined ? 5 : topY });
-}
-
-// Пол (плоскость с правильным repeat)
-function addFloor(sx, sz, kind, tint, cx, cz, y){
-  kind = kind || 'concrete'; tint = tint === undefined ? 0xffffff : tint;
-  cx = cx || 0; cz = cz || 0; y = y === undefined ? 0 : y;
-  var mat = makeMat(kind, tint, 2.0);
-  scaleTexOn(mat, sx, sz);
-  var mesh = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), mat);
-  mesh.rotation.x = -Math.PI / 2;
-  mesh.position.set(cx, y, cz);
-  if(SHADOWS) mesh.receiveShadow = true;
-  world.add(mesh);
-  return mesh;
-}
-
-function addCeil(sx, sz, kind, tint, cx, cz, y){
-  kind = kind || 'concrete'; tint = tint === undefined ? 0x333340 : tint;
-  cx = cx || 0; cz = cz || 0; y = y === undefined ? 3 : y;
-  var mat = makeMat(kind, tint, 2.0);
-  scaleTexOn(mat, sx, sz);
-  var mesh = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), mat);
-  mesh.rotation.x = Math.PI / 2;
-  mesh.position.set(cx, y, cz);
-  world.add(mesh);
-  return mesh;
-}
-
-// Стена — плоскость с корректным UV, смотрит в нужную сторону
-function addWallPlane(x, y, z, w, h, dir, kind, tint, texScale){
-  kind = kind || 'brick'; tint = tint === undefined ? 0xffffff : tint;
-  var mat = makeMat(kind, tint, texScale || 2.0);
-  scaleTexOn(mat, w, h);
-  var mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
-  mesh.position.set(x, y, z);
-  // dir: 'N' — смотрит на -z (внутрь комнаты на север), 'S' на +z, 'E' -x, 'W' +x
-  if(dir === 'S') mesh.rotation.y = 0;             // нормаль к +z
-  if(dir === 'N') mesh.rotation.y = Math.PI;       // нормаль к -z
-  if(dir === 'E') mesh.rotation.y = -Math.PI/2;    // нормаль к -x
-  if(dir === 'W') mesh.rotation.y = Math.PI/2;     // нормаль к +x
-  if(SHADOWS){ mesh.receiveShadow = true; }
-  world.add(mesh);
-  return mesh;
-}
-
-// Прямоугольная комната с проёмом на севере
-function addRoom(sx, sz, h, cx, cz, opts){
-  opts = opts || {};
-  var kind = opts.kind || 'brick';
-  var tint = opts.tint === undefined ? 0xffffff : opts.tint;
-  var floorKind = opts.floorKind || 'concrete';
-  var floorTint = opts.floorTint === undefined ? 0x555560 : opts.floorTint;
-  var ceilTint = opts.ceilTint === undefined ? 0x282832 : opts.ceilTint;
-
-  addFloor(sx, sz, floorKind, floorTint, cx, cz, 0);
-  addCeil(sx, sz, kind, ceilTint, cx, cz, h);
-
-  var hx = sx / 2, hz = sz / 2;
-  var t = 0.3;
-
-  // юг (z = +hz)
-  addWallPlane(cx, h/2, cz + hz, sx, h, 'N', kind, tint);  // смотрит к -z
-  addCollider(cx, cz + hz, sx + 2*t, t, h);
-
-  // восток (x = +hx)
-  addWallPlane(cx + hx, h/2, cz, sz, h, 'E', kind, tint);
-  addCollider(cx + hx, cz, t, sz + 2*t, h);
-
-  // запад
-  addWallPlane(cx - hx, h/2, cz, sz, h, 'W', kind, tint);
-  addCollider(cx - hx, cz, t, sz + 2*t, h);
-
-  // север — с проёмом под дверь
-  var gapW = opts.gapW || 2.6;
-  var gapX = opts.gapX || 0;
-  var northZ = cz - hz;
-
-  if(opts.hasDoor === false){
-    // сплошная стена
-    addWallPlane(cx, h/2, northZ, sx, h, 'S', kind, tint);
-    addCollider(cx, northZ, sx + 2*t, t, h);
-  } else {
-    var leftW  = (gapX - gapW/2) - (cx - hx);
-    var rightW = (cx + hx) - (gapX + gapW/2);
-    if(leftW > 0.02){
-      addWallPlane(cx - hx + leftW/2, h/2, northZ, leftW, h, 'S', kind, tint);
-      addCollider(cx - hx + leftW/2, northZ, leftW, t, h);
-    }
-    if(rightW > 0.02){
-      addWallPlane(gapX + gapW/2 + rightW/2, h/2, northZ, rightW, h, 'S', kind, tint);
-      addCollider(gapX + gapW/2 + rightW/2, northZ, rightW, t, h);
-    }
-    // перемычка над дверью
-    var lintel = new THREE.Mesh(
-      new THREE.BoxGeometry(gapW, h - 2.9, t),
-      makeMat(kind, tint, 2.0)
-    );
-    scaleTexOn(lintel.material, gapW, h - 2.9);
-    lintel.position.set(gapX, h - (h - 2.9)/2, northZ);
-    world.add(lintel);
-  }
-}
-
-// Объекты: ящик
-function addBox(x, y, z, sx, sy, sz, kind, tint, opts){
-  opts = opts || {};
-  var mat = makeMat(kind || 'wood', tint === undefined ? 0xffffff : tint, 1.0);
-  scaleTexOn(mat, sx, sy);
-  var m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
-  m.position.set(x, y, z);
-  if(SHADOWS){ m.castShadow = true; m.receiveShadow = true; }
-  world.add(m);
-  if(opts.collide !== false) addCollider(x, z, sx, sz, y + sy/2);
-  if(opts.climbable){
-    m.userData.climbable = true;
-  }
-  return m;
-}
-
-// Ключ
-function addKey(x, y, z, id){
-  var g = new THREE.Group();
-  var mat = new THREE.MeshStandardMaterial({
-    color: 0xffd23f, emissive: 0x7a5500, emissiveIntensity: 0.9,
-    roughness: 0.35, metalness: 0.9
-  });
-  var shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 10), mat);
-  shaft.rotation.z = Math.PI / 2;
-  g.add(shaft);
-  var ring = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.045, 10, 20), mat);
-  ring.position.x = -0.28;
-  g.add(ring);
-  var tooth = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.18, 0.06), mat);
-  tooth.position.set(0.16, -0.12, 0); g.add(tooth);
-  var tooth2 = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.13, 0.06), mat);
-  tooth2.position.set(0.03, -0.09, 0); g.add(tooth2);
-  var light = new THREE.PointLight(0xffcc44, 1.0, 5.5, 1.8);
-  g.add(light);
-  g.position.set(x, y, z);
-  g.userData = {
-    type: 'key',
-    id: id || 'k1',
-    baseY: y,
-    light: light,
-    taken: false
-  };
-  world.add(g);
-  interactables.push(g);
-  return g;
-}
-
-// Батарейка (для фонарика)
-function addBattery(x, y, z){
-  var g = new THREE.Group();
-  var body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.06, 0.06, 0.2, 12),
-    new THREE.MeshStandardMaterial({ color: 0x22aa22, emissive: 0x004400, emissiveIntensity: 0.8,
-      roughness: 0.4, metalness: 0.5 })
-  );
-  g.add(body);
-  var cap = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.03, 0.03, 0.03, 12),
-    new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.9, roughness: 0.3 })
-  );
-  cap.position.y = 0.11;
-  g.add(cap);
-  var light = new THREE.PointLight(0x44ff44, 0.7, 4, 2);
-  g.add(light);
-  g.position.set(x, y, z);
-  g.userData = { type: 'battery', baseY: y, light: light, taken: false };
-  world.add(g);
-  interactables.push(g);
-  return g;
-}
-
-// Дверь (для перехода)
-function addDoor(x, z, opts){
-  opts = opts || {};
-  var w = opts.w || 2.6, h = opts.h || 2.9;
-  var pivot = new THREE.Group();
-  pivot.position.set(x - w/2, 0, z);
-  world.add(pivot);
-
-  var geo = new THREE.BoxGeometry(w, h, 0.18);
-  geo.translate(w/2, h/2, 0);
-
-  var mat = makeMat('wood', opts.tint === undefined ? 0x8a5a2b : opts.tint, 1.2);
-  scaleTexOn(mat, w, h);
-
-  var mesh = new THREE.Mesh(geo, mat);
-  if(SHADOWS){ mesh.castShadow = true; mesh.receiveShadow = true; }
-  pivot.add(mesh);
-
-  var knob = new THREE.Mesh(
-    new THREE.SphereGeometry(0.08, 12, 12),
-    new THREE.MeshStandardMaterial({ color: 0xdddddd, emissive: 0x333333, metalness: 0.9, roughness: 0.3 })
-  );
-  knob.position.set(w - 0.24, h/2, 0.14);
-  mesh.add(knob);
-
-  var col = { x1: x - w/2, z1: z - 0.25, x2: x + w/2, z2: z + 0.25, topY: h };
-  colliders.push(col);
-
-  var d = {
-    pivot: pivot, x: x, z: z, w: w, h: h,
-    open: false, finished: false, t: 0,
-    needsKey: opts.needsKey || false,
-    keyId: opts.keyId || null,
-    auto: opts.auto || false,
-    collider: col,
-    onOpen: opts.onOpen || null
-  };
-  dynamicObjs.push({ type: 'door', data: d });
-  return d;
-}
-
-// Кнопка на полу/стене (для головоломок)
-function addButton(x, y, z, color, id){
-  var g = new THREE.Group();
-  var base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.24, 0.06, 16),
-    new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.6, metalness: 0.4 })
-  );
-  g.add(base);
-  var top = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.18, 0.08, 16),
-    new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.5, roughness: 0.3 })
-  );
-  top.position.y = 0.04;
-  g.add(top);
-  g.position.set(x, y, z);
-  g.userData = { type: 'button', id: id, top: top, pressed: false, color: color,
-    baseEmissive: 0.5 };
-  world.add(g);
-  interactables.push(g);
-  return g;
-}
-
-// Рычаг
-function addLever(x, y, z, id){
-  var g = new THREE.Group();
-  var base = new THREE.Mesh(
-    new THREE.BoxGeometry(0.25, 0.08, 0.25),
-    new THREE.MeshStandardMaterial({ color: 0x333338, roughness: 0.5, metalness: 0.6 })
-  );
-  g.add(base);
-  var pivot = new THREE.Group();
-  pivot.position.y = 0.05;
-  g.add(pivot);
-  var stick = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8),
-    new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.7, roughness: 0.3 })
-  );
-  stick.position.y = 0.2;
-  pivot.add(stick);
-  var knob = new THREE.Mesh(
-    new THREE.SphereGeometry(0.06, 10, 10),
-    new THREE.MeshStandardMaterial({ color: 0xff3333, emissive: 0x551111, emissiveIntensity: 0.6 })
-  );
-  knob.position.y = 0.4;
-  pivot.add(knob);
-  g.position.set(x, y, z);
-  g.userData = { type: 'lever', id: id, pivot: pivot, on: false, targetRot: -0.8 };
-  world.add(g);
-  interactables.push(g);
-  return g;
-}
-
-// Факел/свеча (для puzzle)
-function addCandle(x, y, z, id){
-  var g = new THREE.Group();
-  var body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.06, 0.3, 8),
-    new THREE.MeshStandardMaterial({ color: 0xeeddbb, roughness: 0.8 })
-  );
-  body.position.y = 0.15;
-  g.add(body);
-  var flame = new THREE.Mesh(
-    new THREE.SphereGeometry(0.06, 8, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffaa22, transparent: true, opacity: 0.9 })
-  );
-  flame.position.y = 0.36;
-  flame.scale.set(1, 1.6, 1);
-  g.add(flame);
-  var light = new THREE.PointLight(0xffaa44, 0.0, 4, 2);
-  light.position.y = 0.4;
-  g.add(light);
-  g.position.set(x, y, z);
-  g.userData = { type: 'candle', id: id, lit: false, flame: flame, light: light };
-  world.add(g);
-  interactables.push(g);
-  return g;
-}
-
-// Кровавая надпись (декор)
-function addDecal(x, y, z, w, h, color, text){
-  var c = document.createElement('canvas');
-  c.width = 512; c.height = 256;
-  var ctx = c.getContext('2d');
-  ctx.fillStyle = 'rgba(0,0,0,0)';
-  ctx.fillRect(0, 0, 512, 256);
-  ctx.font = 'bold 90px Impact, sans-serif';
-  ctx.fillStyle = color || '#8b0000';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text || 'HELP', 256, 128);
-  var tex = new THREE.CanvasTexture(c);
-  var m = new THREE.Mesh(
-    new THREE.PlaneGeometry(w, h),
-    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
-  );
-  m.position.set(x, y, z);
-  world.add(m);
-  return m;
 }
 
 /* =========================================================
@@ -1096,6 +532,469 @@ function screech(){
 }
 
 /* =========================================================
+   ПЕРСОНАЖ-КОТ
+   ========================================================= */
+var catModel = null;
+var pawsModel = null;
+
+function buildCatModel(){
+  var g = new THREE.Group();
+  var RED     = 0xc41e1e;
+  var DARKRED = 0x7a0a0a;
+  var PINK    = 0xff4444;
+  var WHITE   = 0xfff8f0;
+  var BLACK   = 0x101010;
+
+  var mRed    = new THREE.MeshStandardMaterial({ color: RED, roughness: 0.6, metalness: 0.05 });
+  var mDark   = new THREE.MeshStandardMaterial({ color: DARKRED, roughness: 0.6, metalness: 0.05 });
+  var mPink   = new THREE.MeshStandardMaterial({ color: PINK, emissive: 0x440000, emissiveIntensity: 0.5, roughness: 0.4 });
+  var mWhite  = new THREE.MeshStandardMaterial({ color: WHITE, roughness: 0.5 });
+  var mBlack  = new THREE.MeshStandardMaterial({ color: BLACK, roughness: 0.4 });
+
+  var head = new THREE.Mesh(new THREE.SphereGeometry(0.55, 24, 20), mRed);
+  head.scale.set(1.05, 1.0, 0.95);
+  g.add(head);
+
+  var earGeo = new THREE.ConeGeometry(0.22, 0.42, 4);
+  var earL = new THREE.Mesh(earGeo, mRed);
+  earL.position.set(-0.32, 0.55, 0);
+  earL.rotation.z = -0.15; earL.rotation.y = Math.PI / 4;
+  g.add(earL);
+  var earR = earL.clone(); earR.position.x = 0.32; earR.rotation.z = 0.15; g.add(earR);
+
+  var innerGeo = new THREE.ConeGeometry(0.12, 0.26, 4);
+  var innerL = new THREE.Mesh(innerGeo, mDark);
+  innerL.position.set(-0.32, 0.55, 0.06);
+  innerL.rotation.z = -0.15; innerL.rotation.y = Math.PI / 4;
+  g.add(innerL);
+  var innerR = innerL.clone(); innerR.position.x = 0.32; innerR.rotation.z = 0.15; g.add(innerR);
+
+  var eyeGeo = new THREE.SphereGeometry(0.17, 20, 16);
+  var eyeL = new THREE.Mesh(eyeGeo, mPink);
+  eyeL.scale.set(0.9, 1.25, 0.5);
+  eyeL.position.set(-0.22, 0.06, 0.47);
+  g.add(eyeL);
+  var eyeR = eyeL.clone(); eyeR.position.x = 0.22; g.add(eyeR);
+
+  var pupilGeo = new THREE.SphereGeometry(0.06, 12, 12);
+  var pupilL = new THREE.Mesh(pupilGeo, mBlack);
+  pupilL.position.set(-0.22, 0.04, 0.55);
+  pupilL.scale.set(1, 1.5, 0.4);
+  g.add(pupilL);
+  var pupilR = pupilL.clone(); pupilR.position.x = 0.22; g.add(pupilR);
+
+  var nose = new THREE.Mesh(new THREE.SphereGeometry(0.08, 12, 10), mBlack);
+  nose.position.set(0, -0.08, 0.55);
+  nose.scale.set(1.3, 0.9, 0.8);
+  g.add(nose);
+
+  var mouth = new THREE.Mesh(
+    new THREE.SphereGeometry(0.32, 20, 16, 0, Math.PI * 2, 0.35, Math.PI * 0.55),
+    mDark
+  );
+  mouth.position.set(0, -0.18, 0.42);
+  mouth.rotation.x = -0.1;
+  g.add(mouth);
+
+  var teethGeo = new THREE.BoxGeometry(0.12, 0.06, 0.04);
+  var t1 = new THREE.Mesh(teethGeo, mWhite); t1.position.set(0, -0.28, 0.58); g.add(t1);
+  var t2 = t1.clone(); t2.position.set(-0.14, -0.26, 0.58); g.add(t2);
+  var t3 = t1.clone(); t3.position.set(0.14, -0.26, 0.58); g.add(t3);
+
+  var whiskGeo = new THREE.CylinderGeometry(0.008, 0.005, 0.35, 4);
+  function whisk(sx, sy){
+    var w = new THREE.Mesh(whiskGeo, mBlack);
+    w.position.set(sx * 0.42, sy, 0.5);
+    w.rotation.z = Math.PI / 2 + sy * 0.6;
+    w.rotation.y = sx * 0.2;
+    g.add(w);
+  }
+  whisk(-1, 0.12); whisk(-1, -0.02); whisk(-1, -0.14);
+  whisk( 1, 0.12); whisk( 1, -0.02); whisk( 1, -0.14);
+
+  var body = new THREE.Mesh(new THREE.CapsuleGeometry(0.32, 0.5, 8, 16), mRed);
+  body.position.set(0, -1.0, 0);
+  g.add(body);
+
+  var tailCurve = new THREE.CatmullRomCurve3([
+    new THREE.Vector3(0.25, -1.15, -0.15),
+    new THREE.Vector3(0.55, -1.05, -0.35),
+    new THREE.Vector3(0.75, -0.75, -0.35),
+    new THREE.Vector3(0.75, -0.45, -0.15)
+  ]);
+  var tail = new THREE.Mesh(new THREE.TubeGeometry(tailCurve, 20, 0.06, 8, false), mRed);
+  g.add(tail);
+
+  var armGeo = new THREE.CapsuleGeometry(0.09, 0.42, 6, 12);
+  var armL = new THREE.Mesh(armGeo, mRed);
+  armL.position.set(-0.42, -1.02, 0.1);
+  armL.rotation.x = 0.4; armL.rotation.z = 0.3;
+  g.add(armL);
+  var armR = armL.clone(); armR.position.x = 0.42; armR.rotation.z = -0.3; g.add(armR);
+
+  var pawGeo = new THREE.SphereGeometry(0.13, 12, 10);
+  var pawL = new THREE.Mesh(pawGeo, mRed); pawL.position.set(-0.55, -0.78, 0.32); g.add(pawL);
+  var pawR = pawL.clone(); pawR.position.x = 0.55; g.add(pawR);
+
+  var legGeo = new THREE.CapsuleGeometry(0.1, 0.35, 6, 12);
+  var legL = new THREE.Mesh(legGeo, mRed); legL.position.set(-0.22, -1.55, 0); g.add(legL);
+  var legR = legL.clone(); legR.position.x = 0.22; g.add(legR);
+
+  var footGeo = new THREE.SphereGeometry(0.14, 12, 10);
+  var footL = new THREE.Mesh(footGeo, mDark);
+  footL.position.set(-0.22, -1.75, 0.06);
+  footL.scale.set(1, 0.7, 1.4);
+  g.add(footL);
+  var footR = footL.clone(); footR.position.x = 0.22; g.add(footR);
+
+  var glow = new THREE.PointLight(0xff5555, 0.35, 3.5, 2);
+  glow.position.set(0, -0.4, 0.4);
+  g.add(glow);
+
+  g.visible = false;
+  return g;
+}
+
+function buildFirstPersonPaws(){
+  var g = new THREE.Group();
+  var mRed = new THREE.MeshStandardMaterial({ color: 0xc41e1e, roughness: 0.6 });
+  var mDark = new THREE.MeshStandardMaterial({ color: 0x7a0a0a, roughness: 0.6 });
+  var geo = new THREE.CapsuleGeometry(0.055, 0.22, 6, 10);
+
+  var handL = new THREE.Mesh(geo, mRed);
+  handL.position.set(-0.32, -0.32, -0.55);
+  handL.rotation.set(-0.4, 0.2, 0.15);
+  g.add(handL);
+
+  var handR = new THREE.Mesh(geo, mRed);
+  handR.position.set( 0.32, -0.32, -0.55);
+  handR.rotation.set(-0.4, -0.2, -0.15);
+  g.add(handR);
+
+  var pg = new THREE.SphereGeometry(0.08, 10, 8);
+  var pL = new THREE.Mesh(pg, mDark); pL.position.set(-0.34, -0.46, -0.72); g.add(pL);
+  var pR = new THREE.Mesh(pg, mDark); pR.position.set( 0.34, -0.46, -0.72); g.add(pR);
+  return g;
+}
+
+/* =========================================================
+   ГЕОМЕТРИЯ УРОВНЯ
+   ========================================================= */
+var colliders = [];
+var interactables = [];
+var dynamicObjs = [];
+
+function clearWorld(){
+  for(var i = world.children.length - 1; i >= 0; i--){
+    var o = world.children[i];
+    world.remove(o);
+    o.traverse(function(c){
+      if(c.geometry) c.geometry.dispose();
+      if(c.material){
+        var arr = Array.isArray(c.material) ? c.material : [c.material];
+        arr.forEach(function(m){
+          if(m.map && m.map.dispose) m.map.dispose();
+          m.dispose();
+        });
+      }
+    });
+  }
+  colliders = [];
+  interactables = [];
+  dynamicObjs = [];
+}
+
+function addCollider(x, z, w, d, topY){
+  colliders.push({ x1: x - w/2, z1: z - d/2, x2: x + w/2, z2: z + d/2, topY: topY === undefined ? 5 : topY });
+}
+
+function addFloor(sx, sz, kind, tint, cx, cz, y){
+  kind = kind || 'concrete'; tint = tint === undefined ? 0xffffff : tint;
+  cx = cx || 0; cz = cz || 0; y = y === undefined ? 0 : y;
+  var mat = makeMat(kind, tint, 2.0);
+  scaleTexOn(mat, sx, sz);
+  var mesh = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), mat);
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(cx, y, cz);
+  if(SHADOWS) mesh.receiveShadow = true;
+  world.add(mesh);
+  return mesh;
+}
+
+function addCeil(sx, sz, kind, tint, cx, cz, y){
+  kind = kind || 'concrete'; tint = tint === undefined ? 0x333340 : tint;
+  cx = cx || 0; cz = cz || 0; y = y === undefined ? 3 : y;
+  var mat = makeMat(kind, tint, 2.0);
+  scaleTexOn(mat, sx, sz);
+  var mesh = new THREE.Mesh(new THREE.PlaneGeometry(sx, sz), mat);
+  mesh.rotation.x = Math.PI / 2;
+  mesh.position.set(cx, y, cz);
+  world.add(mesh);
+  return mesh;
+}
+
+function addWallPlane(x, y, z, w, h, dir, kind, tint, texScale){
+  kind = kind || 'brick'; tint = tint === undefined ? 0xffffff : tint;
+  var mat = makeMat(kind, tint, texScale || 2.0);
+  scaleTexOn(mat, w, h);
+  var mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), mat);
+  mesh.position.set(x, y, z);
+  if(dir === 'S') mesh.rotation.y = 0;
+  if(dir === 'N') mesh.rotation.y = Math.PI;
+  if(dir === 'E') mesh.rotation.y = -Math.PI/2;
+  if(dir === 'W') mesh.rotation.y = Math.PI/2;
+  if(SHADOWS) mesh.receiveShadow = true;
+  world.add(mesh);
+  return mesh;
+}
+
+function addRoom(sx, sz, h, cx, cz, opts){
+  opts = opts || {};
+  var kind = opts.kind || 'brick';
+  var tint = opts.tint === undefined ? 0xffffff : opts.tint;
+  var floorKind = opts.floorKind || 'concrete';
+  var floorTint = opts.floorTint === undefined ? 0x555560 : opts.floorTint;
+  var ceilTint = opts.ceilTint === undefined ? 0x282832 : opts.ceilTint;
+
+  addFloor(sx, sz, floorKind, floorTint, cx, cz, 0);
+  addCeil(sx, sz, kind, ceilTint, cx, cz, h);
+
+  var hx = sx / 2, hz = sz / 2;
+  var t = 0.3;
+
+  addWallPlane(cx, h/2, cz + hz, sx, h, 'N', kind, tint);
+  addCollider(cx, cz + hz, sx + 2*t, t, h);
+
+  addWallPlane(cx + hx, h/2, cz, sz, h, 'E', kind, tint);
+  addCollider(cx + hx, cz, t, sz + 2*t, h);
+
+  addWallPlane(cx - hx, h/2, cz, sz, h, 'W', kind, tint);
+  addCollider(cx - hx, cz, t, sz + 2*t, h);
+
+  var gapW = opts.gapW || 2.6;
+  var gapX = opts.gapX || 0;
+  var northZ = cz - hz;
+
+  if(opts.hasDoor === false){
+    addWallPlane(cx, h/2, northZ, sx, h, 'S', kind, tint);
+    addCollider(cx, northZ, sx + 2*t, t, h);
+  } else {
+    var leftW  = (gapX - gapW/2) - (cx - hx);
+    var rightW = (cx + hx) - (gapX + gapW/2);
+    if(leftW > 0.02){
+      addWallPlane(cx - hx + leftW/2, h/2, northZ, leftW, h, 'S', kind, tint);
+      addCollider(cx - hx + leftW/2, northZ, leftW, t, h);
+    }
+    if(rightW > 0.02){
+      addWallPlane(gapX + gapW/2 + rightW/2, h/2, northZ, rightW, h, 'S', kind, tint);
+      addCollider(gapX + gapW/2 + rightW/2, northZ, rightW, t, h);
+    }
+    var lintel = new THREE.Mesh(
+      new THREE.BoxGeometry(gapW, h - 2.9, t),
+      makeMat(kind, tint, 2.0)
+    );
+    scaleTexOn(lintel.material, gapW, h - 2.9);
+    lintel.position.set(gapX, h - (h - 2.9)/2, northZ);
+    world.add(lintel);
+  }
+}
+
+function addBox(x, y, z, sx, sy, sz, kind, tint, opts){
+  opts = opts || {};
+  var mat = makeMat(kind || 'wood', tint === undefined ? 0xffffff : tint, 1.0);
+  scaleTexOn(mat, sx, sy);
+  var m = new THREE.Mesh(new THREE.BoxGeometry(sx, sy, sz), mat);
+  m.position.set(x, y, z);
+  if(SHADOWS){ m.castShadow = true; m.receiveShadow = true; }
+  world.add(m);
+  if(opts.collide !== false) addCollider(x, z, sx, sz, y + sy/2);
+  return m;
+}
+
+function addKey(x, y, z, id){
+  var g = new THREE.Group();
+  var mat = new THREE.MeshStandardMaterial({
+    color: 0xffd23f, emissive: 0x7a5500, emissiveIntensity: 0.9,
+    roughness: 0.35, metalness: 0.9
+  });
+  var shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.45, 10), mat);
+  shaft.rotation.z = Math.PI / 2;
+  g.add(shaft);
+  var ring = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.045, 10, 20), mat);
+  ring.position.x = -0.28;
+  g.add(ring);
+  var tooth = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.18, 0.06), mat);
+  tooth.position.set(0.16, -0.12, 0); g.add(tooth);
+  var tooth2 = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.13, 0.06), mat);
+  tooth2.position.set(0.03, -0.09, 0); g.add(tooth2);
+  var light = new THREE.PointLight(0xffcc44, 1.0, 5.5, 1.8);
+  g.add(light);
+  g.position.set(x, y, z);
+  g.userData = { type: 'key', id: id || 'k1', baseY: y, light: light, taken: false };
+  world.add(g);
+  interactables.push(g);
+  return g;
+}
+
+function addBattery(x, y, z){
+  var g = new THREE.Group();
+  var body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.06, 0.2, 12),
+    new THREE.MeshStandardMaterial({ color: 0x22aa22, emissive: 0x004400, emissiveIntensity: 0.8,
+      roughness: 0.4, metalness: 0.5 })
+  );
+  g.add(body);
+  var cap = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.03, 0.03, 0.03, 12),
+    new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.9, roughness: 0.3 })
+  );
+  cap.position.y = 0.11;
+  g.add(cap);
+  var light = new THREE.PointLight(0x44ff44, 0.7, 4, 2);
+  g.add(light);
+  g.position.set(x, y, z);
+  g.userData = { type: 'battery', baseY: y, light: light, taken: false };
+  world.add(g);
+  interactables.push(g);
+  return g;
+}
+
+function addDoor(x, z, opts){
+  opts = opts || {};
+  var w = opts.w || 2.6, h = opts.h || 2.9;
+  var pivot = new THREE.Group();
+  pivot.position.set(x - w/2, 0, z);
+  world.add(pivot);
+
+  var geo = new THREE.BoxGeometry(w, h, 0.18);
+  geo.translate(w/2, h/2, 0);
+
+  var mat = makeMat('wood', opts.tint === undefined ? 0x8a5a2b : opts.tint, 1.2);
+  scaleTexOn(mat, w, h);
+
+  var mesh = new THREE.Mesh(geo, mat);
+  if(SHADOWS){ mesh.castShadow = true; mesh.receiveShadow = true; }
+  pivot.add(mesh);
+
+  var knob = new THREE.Mesh(
+    new THREE.SphereGeometry(0.08, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0xdddddd, emissive: 0x333333, metalness: 0.9, roughness: 0.3 })
+  );
+  knob.position.set(w - 0.24, h/2, 0.14);
+  mesh.add(knob);
+
+  var col = { x1: x - w/2, z1: z - 0.25, x2: x + w/2, z2: z + 0.25, topY: h };
+  colliders.push(col);
+
+  var d = {
+    pivot: pivot, x: x, z: z, w: w, h: h,
+    open: false, finished: false, t: 0,
+    needsKey: opts.needsKey || false,
+    keyId: opts.keyId || null,
+    auto: opts.auto || false,
+    collider: col,
+    onOpen: opts.onOpen || null
+  };
+  dynamicObjs.push({ type: 'door', data: d });
+  return d;
+}
+
+function addButton(x, y, z, color, id){
+  var g = new THREE.Group();
+  var base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.22, 0.24, 0.06, 16),
+    new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.6, metalness: 0.4 })
+  );
+  g.add(base);
+  var top = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.18, 0.08, 16),
+    new THREE.MeshStandardMaterial({ color: color, emissive: color, emissiveIntensity: 0.5, roughness: 0.3 })
+  );
+  top.position.y = 0.04;
+  g.add(top);
+  g.position.set(x, y, z);
+  g.userData = { type: 'button', id: id, top: top, pressed: false, color: color };
+  world.add(g);
+  interactables.push(g);
+  return g;
+}
+
+function addLever(x, y, z, id){
+  var g = new THREE.Group();
+  var base = new THREE.Mesh(
+    new THREE.BoxGeometry(0.25, 0.08, 0.25),
+    new THREE.MeshStandardMaterial({ color: 0x333338, roughness: 0.5, metalness: 0.6 })
+  );
+  g.add(base);
+  var pivot = new THREE.Group();
+  pivot.position.y = 0.05;
+  g.add(pivot);
+  var stick = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8),
+    new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.7, roughness: 0.3 })
+  );
+  stick.position.y = 0.2;
+  pivot.add(stick);
+  var knob = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 10, 10),
+    new THREE.MeshStandardMaterial({ color: 0xff3333, emissive: 0x551111, emissiveIntensity: 0.6 })
+  );
+  knob.position.y = 0.4;
+  pivot.add(knob);
+  g.position.set(x, y, z);
+  g.userData = { type: 'lever', id: id, pivot: pivot, on: false, targetRot: -0.8 };
+  world.add(g);
+  interactables.push(g);
+  return g;
+}
+
+function addCandle(x, y, z, id){
+  var g = new THREE.Group();
+  var body = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.06, 0.3, 8),
+    new THREE.MeshStandardMaterial({ color: 0xeeddbb, roughness: 0.8 })
+  );
+  body.position.y = 0.15;
+  g.add(body);
+  var flame = new THREE.Mesh(
+    new THREE.SphereGeometry(0.06, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffaa22, transparent: true, opacity: 0.9 })
+  );
+  flame.position.y = 0.36;
+  flame.scale.set(1, 1.6, 1);
+  g.add(flame);
+  var light = new THREE.PointLight(0xffaa44, 0.0, 4, 2);
+  light.position.y = 0.4;
+  g.add(light);
+  g.position.set(x, y, z);
+  g.userData = { type: 'candle', id: id, lit: false, flame: flame, light: light };
+  world.add(g);
+  interactables.push(g);
+  return g;
+}
+
+function addDecal(x, y, z, w, h, color, text){
+  var c = document.createElement('canvas');
+  c.width = 512; c.height = 256;
+  var ctx = c.getContext('2d');
+  ctx.fillStyle = 'rgba(0,0,0,0)';
+  ctx.fillRect(0, 0, 512, 256);
+  ctx.font = 'bold 90px Impact, sans-serif';
+  ctx.fillStyle = color || '#8b0000';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text || 'HELP', 256, 128);
+  var tex = new THREE.CanvasTexture(c);
+  var m = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false })
+  );
+  m.position.set(x, y, z);
+  world.add(m);
+  return m;
+}
+
+/* =========================================================
    ИГРОК
    ========================================================= */
 var player = {
@@ -1104,7 +1003,6 @@ var player = {
   yaw: 0, pitch: 0,
   bobPhase: 0, bobAmount: 0,
   stamina: 1, sprinting: false,
-  footstepPhase: 0,
   thirdPerson: false
 };
 var keys = {};
@@ -1113,8 +1011,12 @@ var level = 1;
 var inventory = { keys: {}, batteries: 0 };
 var flashOn = true;
 var battery = 1.0;
-var levelMsgTimer = null;
+var baseAmbient = 0.4;
+var baseHemi = 0.28;
+var baseTorch = 1.0;
 var lastTime = performance.now();
+var timeAcc = 0;
+var footstepAcc = 0;
 
 /* =========================================================
    UI
@@ -1182,6 +1084,7 @@ var lookHint = document.getElementById('lookHint');
 var mobActions = document.getElementById('mobActions');
 var joyTouchId = null, lookTouchId = null;
 var joyCenter = {x:0,y:0}, joyVec = {x:0,y:0}, lookLast = {x:0,y:0};
+var mobSprint = false;
 
 function setCtrlMode(mode){
   ctrlMode = mode;
@@ -1190,7 +1093,7 @@ function setCtrlMode(mode){
   if(ch){
     ch.innerHTML = (mode === 'pc')
       ? 'WASD — ходьба, <span class="k">Shift</span> — бег, <span class="k">Пробел</span> — прыжок'
-      : '<span class="k">Джойстик</span> слева — ходьба, <span class="k">свайп</span> справа — обзор';
+      : '<span class="k">Джойстик</span> слева — ходьба, <span class="k">свайп</span> справа — обзор, кнопки справа — E / прыжок / бег';
   }
   if(mode === 'mobile'){
     joyEl.style.display = 'block';
@@ -1211,30 +1114,28 @@ document.getElementById('modeBtn').addEventListener('click', function(e){
   setCtrlMode(ctrlMode === 'pc' ? 'mobile' : 'pc');
 });
 
+document.getElementById('mobInteract').addEventListener('touchstart', function(e){
+  e.preventDefault(); if(state === 'play') interact();
+});
 document.getElementById('mobJump').addEventListener('touchstart', function(e){
-  e.preventDefault();
-  if(state === 'play') tryJump();
+  e.preventDefault(); if(state === 'play') tryJump();
 });
 document.getElementById('mobSprint').addEventListener('touchstart', function(e){
-  e.preventDefault();
-  if(state === 'play') mobSprint = true;
+  e.preventDefault(); if(state === 'play') mobSprint = true;
 });
 document.getElementById('mobSprint').addEventListener('touchend', function(e){
-  e.preventDefault();
-  mobSprint = false;
+  e.preventDefault(); mobSprint = false;
 });
 document.getElementById('mobSprint').addEventListener('touchcancel', function(){
   mobSprint = false;
 });
-var mobSprint = false;
 
 function onTouchStart(e){
   if(ctrlMode !== 'mobile' || state !== 'play') return;
   var W = window.innerWidth, H = window.innerHeight;
   for(var i = 0; i < e.changedTouches.length; i++){
     var t = e.changedTouches[i];
-    // игнорируем касания по кнопкам действий
-    if(t.target && (t.target.id === 'mobJump' || t.target.id === 'mobSprint')) continue;
+    if(t.target && (t.target.id === 'mobJump' || t.target.id === 'mobSprint' || t.target.id === 'mobInteract')) continue;
     if(joyTouchId === null && t.clientX < W * 0.5 && t.clientY > H * 0.45){
       joyTouchId = t.identifier;
       joyCenter.x = t.clientX; joyCenter.y = t.clientY;
@@ -1245,7 +1146,6 @@ function onTouchStart(e){
     } else if(lookTouchId === null){
       lookTouchId = t.identifier;
       lookLast.x = t.clientX; lookLast.y = t.clientY;
-      // тап по центру — взаимодействие
       if(Math.abs(t.clientX - W/2) < 60 && Math.abs(t.clientY - H/2) < 60){
         interact();
       }
@@ -1294,7 +1194,7 @@ canvas.addEventListener('touchend',   onTouchEnd,   {passive:false});
 canvas.addEventListener('touchcancel',onTouchEnd,   {passive:false});
 
 /* =========================================================
-   ФИЗИКА / ДВИЖЕНИЕ
+   ФИЗИКА
    ========================================================= */
 function hitsAt(x, z, r, y){
   for(var i = 0; i < colliders.length; i++){
@@ -1308,14 +1208,12 @@ function hitsAt(x, z, r, y){
   return false;
 }
 
-// найти высоту пола под ногами (для прыжка на ящики)
 function groundHeightAt(x, z){
   var y = 0;
   for(var i = 0; i < colliders.length; i++){
     var c = colliders[i];
     if(x >= c.x1 && x <= c.x2 && z >= c.z1 && z <= c.z2){
       if(c.topY !== undefined && c.topY > y && c.topY < 5){
-        // стоит на ящике — но только если игрок по высоте выше
         if(player.y + 0.1 > c.topY - 0.05){
           y = Math.max(y, c.topY);
         }
@@ -1341,24 +1239,28 @@ function tryJump(){
 }
 
 /* =========================================================
-   ВЗАИМОДЕЙСТВИЕ (E)
+   ВЗАИМОДЕЙСТВИЕ
    ========================================================= */
 function interact(){
-  // ищем ближайший интерактив в радиусе и в поле зрения
-  var best = null, bestD = 3.0;
+  var best = null, bestD = 3.5;
   for(var i = 0; i < interactables.length; i++){
     var o = interactables[i];
     if(o.userData.taken) continue;
     var dx = o.position.x - player.x;
     var dz = o.position.z - player.z;
     var dy = o.position.y - (player.y + EYE_HEIGHT);
-    var d = Math.sqrt(dx*dx + dz*dz + dy*dy*0.4);
+    var d = Math.sqrt(dx*dx + dz*dz + dy*dy*0.3);
     if(d < bestD){
-      // проверка "перед лицом"
-      var fwdX = -Math.sin(player.yaw), fwdZ = -Math.cos(player.yaw);
-      var dot = (dx * fwdX + dz * fwdZ) / (Math.hypot(dx, dz) || 1);
-      if(dot > 0.2){
+      var ty = o.userData.type;
+      var needFront = (ty === 'key' || ty === 'battery' || ty === 'numbtn');
+      if(!needFront){
         best = o; bestD = d;
+      } else {
+        var fwdX = -Math.sin(player.yaw), fwdZ = -Math.cos(player.yaw);
+        var dot = (dx * fwdX + dz * fwdZ) / (Math.hypot(dx, dz) || 1);
+        if(dot > -0.2){
+          best = o; bestD = d;
+        }
       }
     }
   }
@@ -1396,12 +1298,14 @@ function interact(){
     best.userData.light.intensity = 0.9;
     beep(880, 0.08, 0.05, 'sine');
     onCandleLit(best.userData.id);
+  } else if(t === 'numbtn'){
+    l10Input.push(best.userData.num);
+    beep(500 + best.userData.num * 60, 0.08, 0.06, 'square');
+    showMsg('Введено: ' + l10Input.join(''), 1.0);
+    checkCode();
   }
 }
 
-/* =========================================================
-   ФОНАРИК
-   ========================================================= */
 function toggleFlash(){
   if(battery <= 0.001){
     showMsg('Фонарь разряжен', 1.4, 'warn');
@@ -1417,13 +1321,8 @@ function toggleFlash(){
 /* =========================================================
    УРОВНИ 1-6
    ========================================================= */
-var currentLevel = null;
-
-// -------- УРОВЕНЬ 1: пробуждение, найди ключ --------
 function level1(){
-  currentLevel = { id: 1 };
-  ambient.intensity = 0.4;
-  hemi.intensity = 0.3;
+  ambient.intensity = 0.4; hemi.intensity = 0.3;
   torch.intensity = 1.2; torch.color.set(0xffe0b0);
   flashLight.color.set(0xfff0cc);
   scene.background.set(0x0a0a14);
@@ -1432,30 +1331,24 @@ function level1(){
 
   addRoom(20, 20, 3.2, 0, 0, { kind:'brick', tint:0xdddddd, floorKind:'wood', floorTint:0x886644 });
 
-  // стеллаж
   addBox(-5, 0.75, -5, 4.0, 1.5, 1.0, 'wood', 0x8a6a4a);
   addBox(-5, 1.65, -5, 4.2, 0.1, 1.15, 'wood', 0x6a4a2a);
 
   addKey(-5, 2.0, -5, 'k1');
-
-  // дверь на север
-  var d = addDoor(0, -10, { needsKey:true, keyId:'k1', onOpen: function(){ nextLevel(); } });
-  d.opened = false;
-
-  // пара батареек на всякий
   addBattery(7, 0.5, 6);
 
-  setTask('Найди ключ на полке и открой дверь');
+  addDoor(0, -10, { needsKey:true, keyId:'k1', onOpen: function(){ nextLevel(); } });
 
+  setTask('Найди ключ на полке и открой дверь');
   player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
   player.vy = 0; player.onGround = true;
+  player.thirdPerson = false;
+  inventory = { keys: {}, batteries: 0 };
+  battery = 1.0;
 }
 
-// -------- УРОВЕНЬ 2: темная комната, ищи ключ --------
 function level2(){
-  currentLevel = { id: 2 };
-  ambient.intensity = 0.1;
-  hemi.intensity = 0.06;
+  ambient.intensity = 0.1; hemi.intensity = 0.06;
   torch.intensity = 0.5; torch.color.set(0x6080a0);
   flashLight.color.set(0xdde8ff);
   scene.background.set(0x030308);
@@ -1464,13 +1357,11 @@ function level2(){
 
   addRoom(28, 28, 3.4, 0, 0, { kind:'stone', tint:0xaaaaaa, floorKind:'stone', floorTint:0x777777 });
 
-  // колонны
   var pillars = [[-8,-8],[-8,0],[-8,8],[8,-8],[8,0],[8,8],[0,-6],[0,6]];
   for(var i = 0; i < pillars.length; i++){
     addBox(pillars[i][0], 1.7, pillars[i][1], 1.6, 3.4, 1.6, 'stone', 0x888888);
   }
 
-  // ящики для прыжка
   addBox(6, 0.5, 6, 1.2, 1.0, 1.2, 'wood', 0x8a6a4a);
   addBox(6, 1.6, 6, 1.2, 1.2, 1.2, 'wood', 0x8a6a4a);
 
@@ -1478,20 +1369,16 @@ function level2(){
   addBattery(4, 0.4, -8);
   addBattery(-6, 0.4, 8);
 
-  var d = addDoor(0, -14, { needsKey:true, keyId:'k2', onOpen: function(){ nextLevel(); } });
+  addDoor(0, -14, { needsKey:true, keyId:'k2', onOpen: function(){ nextLevel(); } });
 
   setTask('В темноте найди ключ');
-
   player.x = 0; player.z = 10; player.y = 0; player.yaw = 0; player.pitch = 0;
 }
 
-// -------- УРОВЕНЬ 3: кнопки в правильном порядке --------
 var l3Seq = [];
 var l3Progress = 0;
 function level3(){
-  currentLevel = { id: 3 };
-  ambient.intensity = 0.45;
-  hemi.intensity = 0.35;
+  ambient.intensity = 0.45; hemi.intensity = 0.35;
   torch.intensity = 1.0; torch.color.set(0xffd0a0);
   scene.background.set(0x101018);
   scene.fog.color.set(0x101018);
@@ -1499,22 +1386,18 @@ function level3(){
 
   addRoom(22, 22, 3.2, 0, 0, { kind:'concrete', tint:0xbbbbbb, floorKind:'tile', floorTint:0x888890 });
 
-  // 4 кнопки - нужно нажать в порядке: красная, зелёная, синяя, жёлтая
   var cols = [0xff3333, 0x33ff33, 0x3366ff, 0xffcc00];
   var pos = [[-6, 0.03, -4], [0, 0.03, -4], [6, 0.03, -4], [-3, 0.03, 3]];
-  l3Seq = [0, 1, 2, 3]; // правильный порядок индексов
+  l3Seq = [0, 1, 2, 3];
   l3Progress = 0;
   for(var i = 0; i < 4; i++){
     addButton(pos[i][0], pos[i][1], pos[i][2], cols[i], 'b'+i);
   }
 
-  var d = addDoor(0, -11, { needsKey:false, onOpen: function(){ nextLevel(); } });
-
-  setTask('Нажми кнопки в правильном порядке (подсказка на стене)');
-
-  // подсказка на стене
+  addDoor(0, -11, { needsKey:false, onOpen: function(){ nextLevel(); } });
   addDecal(0, 2.2, -10.9, 4, 1.2, '#ffaa00', 'К  З  С  Ж');
 
+  setTask('Нажми кнопки в правильном порядке (подсказка на стене)');
   player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
 }
 function onButtonPressed(id){
@@ -1527,10 +1410,8 @@ function onButtonPressed(id){
       openDoorById();
     }
   } else {
-    // сброс
     l3Progress = 0;
     showMsg('❌ Неверно — попробуй ещё', 1.5, 'bad');
-    // сброс кнопок
     for(var i = 0; i < interactables.length; i++){
       var o = interactables[i];
       if(o.userData.type === 'button'){
@@ -1551,11 +1432,9 @@ function openDoorById(){
   }
 }
 
-// -------- УРОВЕНЬ 4: рычаги (лабиринт) --------
 var l4Target = [true, false, true, true];
 var l4States = [false, false, false, false];
 function level4(){
-  currentLevel = { id: 4 };
   ambient.intensity = 0.4;
   torch.intensity = 1.0; torch.color.set(0xffe0b0);
   scene.background.set(0x0a0a14);
@@ -1564,14 +1443,12 @@ function level4(){
 
   addRoom(26, 26, 3.4, 0, 0, { kind:'brick', tint:0xcccccc, floorKind:'wood', floorTint:0x765432 });
 
-  // лабиринт
   addBox(-6, 1.7, 0, 0.5, 3.4, 10, 'brick', 0xaaaaaa);
   addBox( 6, 1.7, 0, 0.5, 3.4, 10, 'brick', 0xaaaaaa);
   addBox( 0, 1.7, 6, 8, 3.4, 0.5, 'brick', 0xaaaaaa);
   addBox(-4, 1.7, -6, 6, 3.4, 0.5, 'brick', 0xaaaaaa);
   addBox( 4, 1.7, -6, 6, 3.4, 0.5, 'brick', 0xaaaaaa);
 
-  // 4 рычага
   l4States = [false, false, false, false];
   addLever(-9, 0.0, -9, 'v0');
   addLever( 9, 0.0, -9, 'v1');
@@ -1580,15 +1457,22 @@ function level4(){
 
   addBattery(-9, 0.4, 0);
 
-  var d = addDoor(0, -13, { needsKey:false, onOpen: function(){ nextLevel(); } });
-
-  setTask('Рычаги: ВКЛ / ВЫКЛ / ВКЛ / ВКЛ — в любом порядке');
+  addDoor(0, -13, { needsKey:false, onOpen: function(){ nextLevel(); } });
   addDecal(0, 2.2, -12.9, 4, 1.2, '#ff4444', '1↑ 2↓ 3↑ 4↑');
 
+  setTask('Рычаги: ВКЛ / ВЫКЛ / ВКЛ / ВКЛ — в любом порядке');
   player.x = 0; player.z = 10; player.y = 0; player.yaw = 0; player.pitch = 0;
 }
 function onLeverToggled(id, on){
+  if(id === 'timer' && on){
+    l11Active = true;
+    l11Timer = 10;
+    showMsg('🏃 БЕГИ!', 1.5, 'warn');
+    beep(880, 0.1, 0.08);
+    return;
+  }
   var i = parseInt(id.substr(1));
+  if(isNaN(i) || i > 3) return;
   l4States[i] = on;
   var ok = true;
   for(var k = 0; k < 4; k++) if(l4States[k] !== l4Target[k]) ok = false;
@@ -1598,13 +1482,10 @@ function onLeverToggled(id, on){
   }
 }
 
-// -------- УРОВЕНЬ 5: зажги свечи --------
 var l5Candles = 0;
 var l5Needed = 3;
 function level5(){
-  currentLevel = { id: 5 };
-  ambient.intensity = 0.2;
-  hemi.intensity = 0.15;
+  ambient.intensity = 0.2; hemi.intensity = 0.15;
   torch.intensity = 0.6; torch.color.set(0x8a6a4a);
   scene.background.set(0x080808);
   scene.fog.color.set(0x080808);
@@ -1612,24 +1493,20 @@ function level5(){
 
   addRoom(20, 20, 3.0, 0, 0, { kind:'stone', tint:0x999999, floorKind:'stone', floorTint:0x666666 });
 
-  // 3 свечи по углам + 1 ложная в центре (лишняя для отвлечения)
   addCandle(-7, 0.4, -7, 'c0');
   addCandle( 7, 0.4, -7, 'c1');
   addCandle(-7, 0.4,  7, 'c2');
-  // отвлекающая свеча, ничего не делает
   addCandle( 0, 0.4,  0, 'cx');
-
   addBattery(0, 0.4, -8);
 
-  var d = addDoor(0, -10, { needsKey:false, onOpen: function(){ nextLevel(); } });
+  addDoor(0, -10, { needsKey:false, onOpen: function(){ nextLevel(); } });
 
   setTask('Зажги 3 свечи по углам');
-
   l5Candles = 0;
   player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
 }
 function onCandleLit(id){
-  if(id === 'cx') return; // отвлекающая
+  if(id === 'cx') return;
   l5Candles++;
   if(l5Candles >= l5Needed){
     showMsg('✅ Все свечи горят!', 1.8, 'good');
@@ -1639,9 +1516,7 @@ function onCandleLit(id){
   }
 }
 
-// -------- УРОВЕНЬ 6: ящики — заберись наверх --------
 function level6(){
-  currentLevel = { id: 6 };
   ambient.intensity = 0.35;
   torch.intensity = 1.0; torch.color.set(0xffd0a0);
   scene.background.set(0x0e0e16);
@@ -1650,26 +1525,593 @@ function level6(){
 
   addRoom(22, 22, 4.5, 0, 0, { kind:'concrete', tint:0xcccccc, floorKind:'tile', floorTint:0x888888 });
 
-  // ключ высоко — надо залезть
-  // ступеньки из ящиков
   addBox(-4, 0.5, 4, 1.4, 1.0, 1.4, 'wood', 0x8a6a4a);
   addBox(-4, 1.5, 4, 1.4, 1.0, 1.4, 'wood', 0x8a6a4a);
   addBox(-6, 2.5, 4, 1.4, 1.0, 1.4, 'wood', 0x8a6a4a);
   addBox(-8, 3.5, 4, 1.4, 1.0, 1.4, 'wood', 0x8a6a4a);
 
   addKey(-9.5, 4.2, 4, 'k6');
-
-  // ловушка - провал с шипами? Пока просто декор
   addDecal(-9.5, 4.6, 4, 2, 0.6, '#ff0000', 'ОПАСНО');
 
   addBattery(8, 0.4, 8);
   addBattery(8, 0.4, -8);
 
-  var d = addDoor(0, -11, { needsKey:true, keyId:'k6', onOpen: function(){ nextLevel(); } });
+  addDoor(0, -11, { needsKey:true, keyId:'k6', onOpen: function(){ nextLevel(); } });
 
   setTask('Заберись по ящикам и найди ключ');
-
   player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+/* =========================================================
+   ХЕЛПЕРЫ УРОВНЕЙ 7-15
+   ========================================================= */
+function makePressurePlate(x, y, z, id){
+  var g = new THREE.Group();
+  var base = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 0.08, 1.2),
+    new THREE.MeshStandardMaterial({ color: 0x333338, roughness: 0.6, metalness: 0.5 })
+  );
+  g.add(base);
+  var top = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0, 0.06, 1.0),
+    new THREE.MeshStandardMaterial({ color: 0xff4422, emissive: 0x551100, emissiveIntensity: 0.5, roughness: 0.4 })
+  );
+  top.position.y = 0.05;
+  g.add(top);
+  g.position.set(x, y, z);
+  g.userData = { type:'plate', id:id, top:top, pressed:false, x:x, z:z };
+  world.add(g);
+  return g;
+}
+
+function makePushBox(x, y, z, size){
+  var mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(size * 2, size * 2, size * 2),
+    makeMat('wood', 0x9a7a5a, 1.0)
+  );
+  scaleTexOn(mesh.material, size * 2, size * 2);
+  mesh.position.set(x, y + size, z);
+  if(SHADOWS){ mesh.castShadow = true; mesh.receiveShadow = true; }
+  world.add(mesh);
+  var col = { x1: x - size, z1: z - size, x2: x + size, z2: z + size, topY: y + size * 2 };
+  colliders.push(col);
+  mesh.userData = { type:'pushbox', size:size, col: col };
+  dynamicObjs.push({ type:'pushbox', data: mesh });
+  return mesh;
+}
+
+function makeSymbolButton(x, y, z, symbol, idx){
+  var g = new THREE.Group();
+  var base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.55, 0.06, 24),
+    new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.6, metalness: 0.4 })
+  );
+  g.add(base);
+  var c = document.createElement('canvas');
+  c.width = c.height = 128;
+  var ctx = c.getContext('2d');
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = '#ffcc44';
+  ctx.font = 'bold 90px Arial';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(symbol, 64, 68);
+  var tex = new THREE.CanvasTexture(c);
+  var top = new THREE.Mesh(
+    new THREE.CircleGeometry(0.42, 24),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  top.rotation.x = -Math.PI / 2;
+  top.position.y = 0.035;
+  g.add(top);
+  g.position.set(x, y, z);
+  g.userData = { type:'symbtn', id:idx, symbol:symbol, pressed:false, top:top };
+  world.add(g);
+  return g;
+}
+
+function makeNumberButton(x, y, z, num){
+  var g = new THREE.Group();
+  var base = new THREE.Mesh(
+    new THREE.BoxGeometry(0.55, 0.55, 0.1),
+    new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.5, metalness: 0.6 })
+  );
+  g.add(base);
+  var c = document.createElement('canvas');
+  c.width = c.height = 128;
+  var ctx = c.getContext('2d');
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, 128, 128);
+  ctx.fillStyle = '#44ff44';
+  ctx.font = 'bold 96px Arial';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(String(num), 64, 68);
+  var tex = new THREE.CanvasTexture(c);
+  var face = new THREE.Mesh(
+    new THREE.PlaneGeometry(0.5, 0.5),
+    new THREE.MeshBasicMaterial({ map: tex })
+  );
+  face.position.z = 0.051;
+  g.add(face);
+  g.position.set(x, y, z);
+  g.userData = { type:'numbtn', num:num };
+  world.add(g);
+  interactables.push(g);
+  return g;
+}
+
+function makeMovingLaser(x, y, z, axis, range, speed, phase){
+  var geo = axis === 'x'
+    ? new THREE.BoxGeometry(range * 2, 0.06, 0.06)
+    : new THREE.BoxGeometry(0.06, 0.06, range * 2);
+  var mat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
+  var mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(x, y, z);
+  world.add(mesh);
+  var glow = new THREE.Mesh(
+    geo.clone(),
+    new THREE.MeshBasicMaterial({ color: 0xff6666, transparent: true, opacity: 0.35 })
+  );
+  glow.position.copy(mesh.position);
+  world.add(glow);
+  var laser = { mesh: mesh, glow: glow, axis: axis, range: range, speed: speed, phase: phase,
+    baseX: x, baseZ: z };
+  dynamicObjs.push({ type:'laser', data: laser });
+  return laser;
+}
+
+function makeShadowMonster(x, y, z){
+  var g = new THREE.Group();
+  var mat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.85 });
+  var body = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 14), mat);
+  body.scale.set(1, 1.6, 1);
+  body.position.y = 1.1;
+  g.add(body);
+  var head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 14), mat);
+  head.position.y = 2.1;
+  g.add(head);
+  var eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+  var eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
+  eyeL.position.set(-0.15, 2.2, 0.4);
+  g.add(eyeL);
+  var eyeR = eyeL.clone(); eyeR.position.x = 0.15; g.add(eyeR);
+  var aura = new THREE.PointLight(0x220000, 0.6, 6, 2);
+  aura.position.y = 1.5;
+  g.add(aura);
+  g.position.set(x, y, z);
+  g.userData = { type: 'monster' };
+  world.add(g);
+  return g;
+}
+
+/* =========================================================
+   УРОВНИ 7-15
+   ========================================================= */
+function level7(){
+  ambient.intensity = 0.3; hemi.intensity = 0.2;
+  torch.intensity = 0.9; torch.color.set(0x88a0c0);
+  scene.background.set(0x080810);
+  scene.fog.color.set(0x080810);
+  scene.fog.near = 4; scene.fog.far = 28;
+
+  addRoom(24, 24, 3.2, 0, 0, { kind:'stone', tint:0x999999, floorKind:'stone', floorTint:0x666666 });
+
+  addBox(0, 1.6, 0, 12, 3.2, 0.6, 'stone', 0xaaaaaa);
+  addBox(-9, 1.6, -6, 0.6, 3.2, 12, 'stone', 0xaaaaaa);
+  addBox( 9, 1.6,  6, 0.6, 3.2, 12, 'stone', 0xaaaaaa);
+
+  var fakeWall = new THREE.Mesh(
+    new THREE.BoxGeometry(4, 3.2, 0.5),
+    makeMat('stone', 0xa8a8a8, 1.5)
+  );
+  scaleTexOn(fakeWall.material, 4, 3.2);
+  fakeWall.position.set(0, 1.6, -6);
+  world.add(fakeWall);
+
+  addKey(0, 0.6, -9, 'k7');
+  addDecal(0, 2.6, -5.9, 3, 1, '#6a6a6a', '?');
+
+  addBattery(8, 0.4, 8);
+  addBattery(-8, 0.4, 8);
+
+  addDoor(0, -12, { needsKey:true, keyId:'k7', onOpen: function(){ nextLevel(); } });
+  setTask('Найди проход. Не все стены — стены.');
+  player.x = 0; player.z = 10; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+var l8Plates = [];
+var l8Pressed = 0;
+var l8Needed = 3;
+var l8Done = false;
+function level8(){
+  ambient.intensity = 0.4;
+  torch.intensity = 1.0; torch.color.set(0xffd0a0);
+  scene.background.set(0x0e0e16);
+  scene.fog.color.set(0x0e0e16);
+  scene.fog.near = 6; scene.fog.far = 34;
+
+  addRoom(26, 26, 3.4, 0, 0, { kind:'concrete', tint:0xbbbbbb, floorKind:'tile', floorTint:0x888890 });
+
+  l8Plates = [];
+  l8Pressed = 0;
+  l8Done = false;
+
+  var plPos = [[-8, 0, -8], [8, 0, -8], [0, 0, 8]];
+  for(var i = 0; i < 3; i++){
+    l8Plates.push(makePressurePlate(plPos[i][0], plPos[i][1], plPos[i][2], 'p' + i));
+  }
+
+  makePushBox(-4, 0, -8, 0.9);
+  makePushBox( 4, 0, -8, 0.9);
+  makePushBox( 0, 0,  4, 0.9);
+  makePushBox(-10, 0, -8, 0.9);
+  makePushBox( 10, 0,  8, 0.9);
+
+  addBattery(-12, 0.4, 0);
+
+  addDoor(0, -13, { needsKey:false, onOpen: function(){ nextLevel(); } });
+  setTask('Поставь ящики на 3 плиты');
+  player.x = 0; player.z = 11; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+var l9Symbols = ['★', '☾', '▲', '♥'];
+var l9Order = [];
+var l9Progress = 0;
+function level9(){
+  ambient.intensity = 0.35;
+  torch.intensity = 0.9; torch.color.set(0xc0a090);
+  scene.background.set(0x0a0a12);
+  scene.fog.color.set(0x0a0a12);
+  scene.fog.near = 5; scene.fog.far = 30;
+
+  addRoom(22, 22, 3.2, 0, 0, { kind:'brick', tint:0xc0c0c0, floorKind:'wood', floorTint:0x7a5a3a });
+
+  l9Order = [0, 2, 3, 1];
+  l9Progress = 0;
+
+  var positions = [[-6, -6], [6, -6], [-6, 6], [6, 6]];
+  for(var i = 0; i < 4; i++){
+    makeSymbolButton(positions[i][0], 0.04, positions[i][1], l9Symbols[i], i);
+  }
+
+  addDecal(0, 2.2, -10.9, 6, 1.2, '#ffcc44', '★  ▲  ♥  ☾');
+  addBattery(0, 0.4, -8);
+  addDoor(0, -11, { needsKey:false, onOpen: function(){ nextLevel(); } });
+
+  setTask('Наступи на символы в порядке: ★ ▲ ♥ ☾');
+  player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+var l10Code = [3, 1, 4, 1, 5];
+var l10Input = [];
+function level10(){
+  ambient.intensity = 0.4;
+  torch.intensity = 1.0; torch.color.set(0xffd0a0);
+  scene.background.set(0x0e0e18);
+  scene.fog.color.set(0x0e0e18);
+  scene.fog.near = 6; scene.fog.far = 32;
+
+  addRoom(24, 24, 3.4, 0, 0, { kind:'metal', tint:0xa0a0b0, floorKind:'tile', floorTint:0x707080 });
+
+  l10Input = [];
+  var numPositions = [
+    [4.5, 2.4, -11.4], [5.5, 2.4, -11.4], [6.5, 2.4, -11.4],
+    [4.5, 1.6, -11.4], [5.5, 1.6, -11.4], [6.5, 1.6, -11.4],
+    [4.5, 0.8, -11.4], [5.5, 0.8, -11.4], [6.5, 0.8, -11.4]
+  ];
+  for(var i = 0; i < 9; i++){
+    makeNumberButton(numPositions[i][0], numPositions[i][1], numPositions[i][2], i + 1);
+  }
+
+  addDecal(0, 2.2, -11.3, 3, 0.8, '#44ff44', 'ЧИСЛО ПИ');
+  addBattery(8, 0.4, 8);
+  addBattery(-8, 0.4, 8);
+
+  addDoor(0, -11.5, { needsKey:false, onOpen: function(){ nextLevel(); } });
+  setTask('Введи число π: 3 1 4 1 5');
+  player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+var l11Timer = 0;
+var l11Active = false;
+var l11DoorRef = null;
+function level11(){
+  ambient.intensity = 0.35;
+  torch.intensity = 0.9; torch.color.set(0xffaa80);
+  scene.background.set(0x0a0810);
+  scene.fog.color.set(0x0a0810);
+  scene.fog.near = 5; scene.fog.far = 30;
+
+  addRoom(28, 28, 3.4, 0, 0, { kind:'rust', tint:0xb0b0b0, floorKind:'metal', floorTint:0x808088 });
+
+  addLever(0, 0.0, 10, 'timer');
+  l11DoorRef = addDoor(0, -13, { needsKey:false, onOpen: function(){ nextLevel(); } });
+
+  addBox(-4, 1.6, 0, 0.6, 3.4, 4, 'rust', 0xaaaaaa);
+  addBox( 4, 1.6, 0, 0.6, 3.4, 4, 'rust', 0xaaaaaa);
+  addBox( 0, 1.6, -5, 6, 3.4, 0.6, 'rust', 0xaaaaaa);
+
+  addDecal(0, 2.4, -12.9, 5, 1, '#ff3333', '10 СЕКУНД');
+
+  l11Timer = 0;
+  l11Active = false;
+
+  setTask('Дёрни рычаг → беги к двери за 10 секунд');
+  player.x = 0; player.z = 11; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+var l12Lasers = [];
+var l12LastHit = 0;
+function level12(){
+  ambient.intensity = 0.15; hemi.intensity = 0.1;
+  torch.intensity = 0.6; torch.color.set(0xff4040);
+  scene.background.set(0x080808);
+  scene.fog.color.set(0x080808);
+  scene.fog.near = 3; scene.fog.far = 25;
+
+  addRoom(28, 28, 3.4, 0, 0, { kind:'metal', tint:0x888888, floorKind:'metal', floorTint:0x707080 });
+
+  l12Lasers = [];
+  for(var i = 0; i < 3; i++){
+    l12Lasers.push(makeMovingLaser(0, 1.0 + i * 0.7, -8 + i * 6, 'x', 10, 1.5 + i * 0.4, i * 1.7));
+  }
+  for(var j = 0; j < 2; j++){
+    l12Lasers.push(makeMovingLaser(-8 + j * 8, 1.6, 0, 'z', 12, 1.0 + j * 0.3, j * 2.5 + 1));
+  }
+
+  addBattery(0, 0.4, 10);
+  addDoor(0, -14, { needsKey:false, onOpen: function(){ nextLevel(); } });
+  setTask('Пройти через лазеры — не задень их');
+  player.x = 0; player.z = 12; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+function level13(){
+  ambient.intensity = 0.4;
+  torch.intensity = 1.0; torch.color.set(0xffe0b0);
+  scene.background.set(0x0a0a14);
+  scene.fog.color.set(0x0a0a14);
+  scene.fog.near = 6; scene.fog.far = 36;
+
+  addRoom(30, 30, 3.4, 0, 0, { kind:'brick', tint:0xcccccc, floorKind:'wood', floorTint:0x7a5a3a });
+
+  addBox(-5, 1.7, 0, 0.4, 3.4, 12, 'brick', 0xbbbbbb);
+  addBox( 5, 1.7, 0, 0.4, 3.4, 12, 'brick', 0xbbbbbb);
+  addBox( 0, 1.7, -6, 10, 3.4, 0.4, 'brick', 0xbbbbbb);
+
+  addKey(-8, 0.6, -10, 'k13a');
+  addKey( 9, 0.6,  9, 'k13b');
+
+  addDoor(0, -13, { needsKey:true, keyId:'k13a', onOpen: function(){
+    showMsg('Первая дверь открыта. Найди второй ключ!', 2.2, 'good');
+  }});
+  addDoor(-8, -5.5, { needsKey:true, keyId:'k13b', onOpen: function(){ nextLevel(); } });
+
+  addBattery(0, 0.4, 10);
+  setTask('Найди 2 ключа и открой 2 двери');
+  player.x = 0; player.z = 12; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+var l14Monster = null;
+var l14MonsterSpeed = 2.4;
+function level14(){
+  ambient.intensity = 0.12; hemi.intensity = 0.08;
+  torch.intensity = 0.4; torch.color.set(0xff2020);
+  scene.background.set(0x050005);
+  scene.fog.color.set(0x050005);
+  scene.fog.near = 2; scene.fog.far = 16;
+
+  addRoom(34, 34, 3.6, 0, 0, { kind:'blood', tint:0x909090, floorKind:'stone', floorTint:0x606060 });
+
+  var walls = [
+    [-6, -6, 8, 0.6], [6, -6, 8, 0.6],
+    [-6, 6, 8, 0.6], [6, 6, 8, 0.6],
+    [0, -10, 0.6, 6], [0, 10, 0.6, 6],
+    [-12, 0, 0.6, 6], [12, 0, 0.6, 6]
+  ];
+  for(var i = 0; i < walls.length; i++){
+    addBox(walls[i][0], 1.8, walls[i][1], walls[i][2], 3.6, walls[i][3], 'blood', 0x999999);
+  }
+
+  addKey(0, 0.6, -15, 'k14');
+  addDoor(0, -16.5, { needsKey:true, keyId:'k14', onOpen: function(){ nextLevel(); } });
+
+  l14Monster = makeShadowMonster(15, 0, 15);
+  l14MonsterSpeed = 2.4;
+
+  setTask('НАЙДИ КЛЮЧ! Тень уже идёт за тобой!');
+  showMsg('⚠ ОНО ПРОСНУЛОСЬ', 2.5, 'bad');
+
+  addBattery(-14, 0.4, 14);
+  addBattery(14, 0.4, -14);
+
+  player.x = 0; player.z = 14; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+function level15(){
+  ambient.intensity = 0.08; hemi.intensity = 0.05;
+  torch.intensity = 0.3; torch.color.set(0xff1010);
+  flashLight.color.set(0xffc0c0);
+  scene.background.set(0x030003);
+  scene.fog.color.set(0x030003);
+  scene.fog.near = 1.5; scene.fog.far = 12;
+
+  addRoom(8, 30, 3.0, 0, 0, { kind:'blood', tint:0x909090, floorKind:'stone', floorTint:0x505050 });
+
+  addDecal(0, 2.0, -14.9, 6, 1.2, '#8b0000', 'БЕГИ');
+  addDecal(0, 2.0, 14.9, 6, 1.2, '#8b0000', 'ОН УЖЕ ЗДЕСЬ');
+
+  for(var z = 10; z > -12; z -= 6){
+    var l = new THREE.PointLight(0xff3030, 0.5, 8, 2);
+    l.position.set(0, 2.6, z);
+    world.add(l);
+  }
+
+  addDoor(0, -13.5, {
+    needsKey:false,
+    auto:true,
+    tint:0x5e1212,
+    onOpen: function(){ setTimeout(startEnding, 500); }
+  });
+
+  setTask('Иди к двери...');
+  player.x = 0; player.z = 12; player.y = 0; player.yaw = 0; player.pitch = 0;
+}
+
+/* =========================================================
+   ЛОГИКА СПЕЦ-МЕХАНИК
+   ========================================================= */
+function checkPlates(){
+  if(!l8Plates || l8Plates.length === 0) return;
+  var pressed = 0;
+  for(var i = 0; i < l8Plates.length; i++){
+    var p = l8Plates[i];
+    var wasPressed = p.userData.pressed;
+    var now = false;
+    for(var j = 0; j < dynamicObjs.length; j++){
+      var pb = dynamicObjs[j];
+      if(pb.type !== 'pushbox') continue;
+      var box = pb.data;
+      var d = Math.hypot(box.position.x - p.userData.x, box.position.z - p.userData.z);
+      if(d < 1.0){ now = true; break; }
+    }
+    p.userData.pressed = now;
+    p.userData.top.material.emissiveIntensity = now ? 1.5 : 0.5;
+    if(now) pressed++;
+    if(now !== wasPressed) beep(now ? 660 : 330, 0.08, 0.06, 'square');
+  }
+  l8Pressed = pressed;
+  if(pressed >= l8Needed && !l8Done){
+    l8Done = true;
+    showMsg('✅ Все плиты нажаты!', 1.8, 'good');
+    openDoorById();
+  }
+}
+
+function checkSymbolTreads(){
+  if(level !== 9) return;
+  for(var w = 0; w < world.children.length; w++){
+    var o = world.children[w];
+    if(!o.userData || o.userData.type !== 'symbtn') continue;
+    var d = Math.hypot(player.x - o.position.x, player.z - o.position.z);
+    if(d < 0.7 && player.y < 0.3 && !o.userData.pressed){
+      o.userData.pressed = true;
+      var idx = o.userData.id;
+      if(l9Order[l9Progress] === idx){
+        l9Progress++;
+        o.userData.top.material.color.set(0x44ff44);
+        beep(700, 0.08, 0.07);
+        if(l9Progress >= l9Order.length){
+          showMsg('✅ Порядок верный!', 1.8, 'good');
+          openDoorById();
+        }
+      } else {
+        l9Progress = 0;
+        showMsg('❌ Сброс', 1.4, 'bad');
+        for(var k = 0; k < world.children.length; k++){
+          var o2 = world.children[k];
+          if(o2.userData && o2.userData.type === 'symbtn'){
+            o2.userData.pressed = false;
+            o2.userData.top.material.color.set(0xffffff);
+          }
+        }
+      }
+    }
+  }
+}
+
+function checkCode(){
+  if(l10Input.length === l10Code.length){
+    var ok = true;
+    for(var i = 0; i < l10Code.length; i++){
+      if(l10Input[i] !== l10Code[i]){ ok = false; break; }
+    }
+    if(ok){
+      showMsg('✅ Код верный!', 1.8, 'good');
+      openDoorById();
+    } else {
+      showMsg('❌ Неверный код', 1.4, 'bad');
+      beep(180, 0.2, 0.07);
+    }
+    l10Input = [];
+  }
+}
+
+function updateTimer11(dt){
+  if(level !== 11 || !l11Active) return;
+  l11Timer -= dt;
+  setTask('⏱ Осталось: ' + l11Timer.toFixed(1) + ' с — беги к двери!');
+  if(l11Timer <= 0 && l11DoorRef && !l11DoorRef.open){
+    l11Active = false;
+    l11Timer = 0;
+    showMsg('❌ Не успел!', 2, 'bad');
+    beep(120, 0.4, 0.1);
+    setTimeout(function(){
+      player.x = 0; player.z = 11;
+      l11Active = false;
+      setTask('Дёрни рычаг → беги к двери за 10 секунд');
+    }, 1500);
+  }
+}
+
+function updateLasers(dt){
+  if(level !== 12) return;
+  for(var i = 0; i < l12Lasers.length; i++){
+    var l = l12Lasers[i];
+    var off = Math.sin(timeAcc * l.speed + l.phase) * 6;
+    if(l.axis === 'x'){
+      l.mesh.position.z = l.baseZ + off;
+      l.glow.position.z = l.baseZ + off;
+      var distZ = Math.abs(player.z - l.mesh.position.z);
+      var distY = Math.abs(player.y + EYE_HEIGHT - l.mesh.position.y);
+      if(distZ < 0.35 && distY < 0.6) hitByLaser();
+    } else {
+      l.mesh.position.x = l.baseX + off;
+      l.glow.position.x = l.baseX + off;
+      var distX = Math.abs(player.x - l.mesh.position.x);
+      var distY2 = Math.abs(player.y + EYE_HEIGHT - l.mesh.position.y);
+      if(distX < 0.35 && distY2 < 0.6) hitByLaser();
+    }
+  }
+}
+function hitByLaser(){
+  var now = performance.now();
+  if(now - l12LastHit < 1500) return;
+  l12LastHit = now;
+  showMsg('⚡ Лазер! Отбросило назад', 1.5, 'bad');
+  beep(140, 0.3, 0.1);
+  var backX = Math.sin(player.yaw);
+  var backZ = Math.cos(player.yaw);
+  player.x += backX * 2.5;
+  player.z += backZ * 2.5;
+  if(player.z < 12) player.z = 12;
+}
+
+function updateMonster(dt){
+  if(level !== 14 || !l14Monster) return;
+  var mx = l14Monster.position.x;
+  var mz = l14Monster.position.z;
+  var dx = player.x - mx;
+  var dz = player.z - mz;
+  var d = Math.hypot(dx, dz);
+  if(d > 0.01){
+    var sp = l14MonsterSpeed * (d < 5 ? 1.6 : 1.0);
+    l14Monster.position.x += (dx / d) * sp * dt;
+    l14Monster.position.z += (dz / d) * sp * dt;
+  }
+  if(d < 1.0){
+    var now = performance.now();
+    if(now - (l14Monster.userData.lastHit || 0) > 1200){
+      l14Monster.userData.lastHit = now;
+      showMsg('💀 ОНО КОСНУЛОСЬ ТЕБЯ', 1.6, 'bad');
+      beep(90, 0.4, 0.12);
+      player.x -= (dx / (d || 1)) * 3;
+      player.z -= (dz / (d || 1)) * 3;
+    }
+  }
+  for(var i = 0; i < l14Monster.children.length; i++){
+    var c = l14Monster.children[i];
+    if(c.isPointLight){
+      c.intensity = 0.4 + (1 - Math.min(1, d / 10)) * 1.2;
+    }
+  }
 }
 
 /* =========================================================
@@ -1677,29 +2119,35 @@ function level6(){
    ========================================================= */
 var LEVELS = {
   1: level1, 2: level2, 3: level3,
-  4: level4, 5: level5, 6: level6
-  // 7-15 в части 2
+  4: level4, 5: level5, 6: level6,
+  7: level7, 8: level8, 9: level9,
+  10: level10, 11: level11, 12: level12,
+  13: level13, 14: level14, 15: level15
 };
 
 function startLevel(n){
   level = n;
-  if(LEVELS[n]) LEVELS[n]();
-  else {
-    showMsg('Уровень ' + n + ' — загружается из части 2...', 3, 'warn');
-  }
-  updateHUD();
-  clearInteractState();
-}
-
-function clearInteractState(){
-  // сброс таймеров, состояний паззлов
   l3Progress = 0;
   l5Candles = 0;
+  l8Done = false;
+  l9Progress = 0;
+  l10Input = [];
+  l11Active = false;
+  l12LastHit = 0;
+  l14Monster = null;
+
+  if(LEVELS[n]) LEVELS[n]();
+
+  // сохраняем базовую яркость этого уровня
+  baseAmbient = ambient.intensity;
+  baseHemi = hemi.intensity;
+  baseTorch = torch.intensity;
+
+  updateHUD();
 }
 
 function nextLevel(){
   if(level >= TOTAL_LEVELS){
-    // финал
     setTimeout(startEnding, 800);
     return;
   }
@@ -1719,15 +2167,8 @@ function nextLevel(){
 /* =========================================================
    ОБНОВЛЕНИЕ
    ========================================================= */
-var timeAcc = 0;
-var footstepAcc = 0;
-
 function update(dt){
   timeAcc += dt;
-
-  if(state !== 'play'){
-    // все равно обновляем анимации ключей/двери в "transition"
-  }
 
   // --- движение игрока ---
   var fx = 0, fz = 0;
@@ -1744,7 +2185,6 @@ function update(dt){
     if(mobSprint) wantSprint = true;
   }
 
-  // спринт
   var canSprint = wantSprint && player.stamina > 0.05 && (fx !== 0 || fz !== 0);
   if(canSprint){
     player.stamina = Math.max(0, player.stamina - SPRINT_DRAIN * dt);
@@ -1755,7 +2195,6 @@ function update(dt){
   }
 
   var speed = player.sprinting ? RUN_SPEED : WALK_SPEED;
-
   var mag = Math.hypot(fx, fz);
   if(mag > 0.05){
     if(mag > 1){ fx /= mag; fz /= mag; }
@@ -1763,27 +2202,20 @@ function update(dt){
     var sp = speed * dt * Math.min(1, mag);
     moveWithCollision((s * fz + c * fx) * sp, (c * fz - s * fx) * sp);
 
-    // покачивание камеры
     player.bobPhase += dt * (player.sprinting ? 12 : 8);
     player.bobAmount = player.sprinting ? 0.07 : 0.045;
 
-    // шаги
     footstepAcc += dt * (player.sprinting ? 3.6 : 2.2);
-    if(footstepAcc > 1){
-      footstepAcc = 0;
-      footstep(player.sprinting);
-    }
+    if(footstepAcc > 1){ footstepAcc = 0; footstep(player.sprinting); }
   } else {
     player.bobPhase += dt * 2;
     player.bobAmount *= 0.85;
     if(player.bobAmount < 0.005) player.bobAmount = 0;
   }
 
-  // --- прыжок / гравитация ---
+  // --- гравитация / прыжок ---
   player.vy += GRAVITY * dt;
   player.y += player.vy * dt;
-
-  // пол под ногами
   var groundY = groundHeightAt(player.x, player.z);
   if(player.y <= groundY){
     player.y = groundY;
@@ -1792,11 +2224,9 @@ function update(dt){
   } else {
     player.onGround = false;
   }
-
-  // защита от падения в бездну (низ)
   if(player.y < -5) player.y = 0;
 
-  // --- камера с покачиванием ---
+  // --- камера ---
   var bobY = Math.sin(player.bobPhase * 2) * player.bobAmount;
   var bobX = Math.cos(player.bobPhase) * player.bobAmount * 0.5;
   var roll = Math.cos(player.bobPhase) * player.bobAmount * 0.15;
@@ -1810,7 +2240,7 @@ function update(dt){
   camera.rotation.x = player.pitch;
   camera.rotation.z = roll;
 
-  // --- модель кота (3-е лицо) ---
+  // --- кот 3-е лицо ---
   if(catModel){
     catModel.visible = player.thirdPerson;
     catModel.position.set(player.x, player.y + EYE_HEIGHT - 1.5, player.z);
@@ -1819,21 +2249,24 @@ function update(dt){
   }
   if(pawsModel){
     pawsModel.visible = !player.thirdPerson;
-    // легкое покачивание лапок
     pawsModel.position.y = Math.sin(player.bobPhase * 2) * player.bobAmount * 0.5;
     pawsModel.rotation.x = Math.sin(player.bobPhase) * player.bobAmount * 0.2;
   }
 
-  // --- фонарик: разряд ---
-  if(flashOn && battery > 0){
+  // --- фонарик: разряд / реген ---
+  var flashlightActive = flashOn && battery > 0;
+  if(flashlightActive){
     battery = Math.max(0, battery - BATT_DRAIN * dt);
     if(battery <= 0){
       flashOn = false;
       flashLight.visible = false;
       showMsg('🔌 Фонарь разрядился!', 2.0, 'warn');
+      flashlightActive = false;
     }
+  } else {
+    // когда выключен — медленно заряжается: +1% каждые 10 секунд
+    battery = Math.min(1, battery + BATT_REGEN * dt);
   }
-  // мигание на низком заряде
   var flick = 1
     + Math.sin(timeAcc * 17.3) * 0.04
     + Math.sin(timeAcc * 31.7) * 0.025;
@@ -1841,11 +2274,45 @@ function update(dt){
     var blink = (Math.random() < 0.06) ? 0.2 : 1;
     flashLight.intensity = 1.8 * flick * blink;
   } else {
-    flashLight.intensity = 1.8 * flick * (flashOn ? 1 : 0);
+    flashLight.intensity = 1.8 * flick * (flashlightActive ? 1 : 0);
   }
-  flashLight.visible = flashOn && battery > 0;
+  flashLight.visible = flashlightActive;
 
-  torch.intensity = torch.intensity; // статично
+  // --- затемнение сцены, когда фонарик выключен ---
+  var darkMul = flashlightActive ? 1.0 : 0.2;
+  ambient.intensity = baseAmbient * darkMul;
+  hemi.intensity    = baseHemi    * darkMul;
+  torch.intensity   = baseTorch   * (flashlightActive ? 1.0 : 0.3);
+
+  // --- авто-подбор ключей и батареек ---
+  if(state === 'play'){
+    for(var ai = 0; ai < interactables.length; ai++){
+      var objA = interactables[ai];
+      if(objA.userData.taken) continue;
+      var typA = objA.userData.type;
+      if(typA !== 'key' && typA !== 'battery') continue;
+      var ddx = objA.position.x - player.x;
+      var ddz = objA.position.z - player.z;
+      var ddy = objA.position.y - (player.y + EYE_HEIGHT);
+      var ddist = Math.sqrt(ddx*ddx + ddz*ddz + ddy*ddy*0.5);
+      if(ddist < 1.7){
+        objA.userData.taken = true;
+        objA.visible = false;
+        if(typA === 'key'){
+          inventory.keys[objA.userData.id] = true;
+          showMsg('🔑 Ключ найден', 1.8, 'good');
+          beep(1100, 0.06, 0.08);
+          setTimeout(function(){ beep(1600, 0.1, 0.08); }, 70);
+        } else {
+          inventory.batteries++;
+          battery = Math.min(1, battery + 0.5);
+          showMsg('🔋 +50% заряда', 1.8, 'good');
+          beep(700, 0.08, 0.07, 'sine');
+        }
+      }
+    }
+  }
+
   updateHUD();
 
   // --- анимация интерактивов ---
@@ -1866,10 +2333,12 @@ function update(dt){
         o.userData.flame.scale.z = 1 + Math.cos(timeAcc * 15) * 0.15;
         o.userData.light.intensity = 0.85 + Math.sin(timeAcc * 9) * 0.15;
       }
+    } else if(o.userData.type === 'lever'){
+      o.userData.pivot.rotation.x += (o.userData.targetRot - o.userData.pivot.rotation.x) * Math.min(1, dt * 8);
     }
   }
 
-  // --- анимация дверей ---
+  // --- двери ---
   for(var j = 0; j < dynamicObjs.length; j++){
     var obj = dynamicObjs[j];
     if(obj.type === 'door'){
@@ -1883,7 +2352,6 @@ function update(dt){
           if(d.onOpen) d.onOpen();
         }
       }
-      // авто-дверь
       if(d.auto && !d.open){
         var dx = player.x - d.x, dz = player.z - d.z;
         if(Math.hypot(dx, dz) < 4.5){
@@ -1896,29 +2364,61 @@ function update(dt){
     }
   }
 
-  // --- рычаги (плавный поворот) ---
-  for(var k = 0; k < interactables.length; k++){
-    var o2 = interactables[k];
-    if(o2.userData.type === 'lever'){
-      o2.userData.pivot.rotation.x += (o2.userData.targetRot - o2.userData.pivot.rotation.x) * Math.min(1, dt * 8);
+  // --- толкание ящиков ---
+  if(state === 'play'){
+    for(var pi = 0; pi < dynamicObjs.length; pi++){
+      var pb = dynamicObjs[pi];
+      if(pb.type !== 'pushbox') continue;
+      var box = pb.data;
+      var sz = box.userData.size;
+      var bx = box.position.x, bz = box.position.z;
+      var dx2 = player.x - bx;
+      var dz2 = player.z - bz;
+      var dist2 = Math.hypot(dx2, dz2);
+      var minDist = sz + PLAYER_R;
+      if(dist2 < minDist && dist2 > 0.01){
+        var push = (minDist - dist2) * 0.6;
+        var nx = bx - (dx2 / dist2) * push;
+        var nz = bz - (dz2 / dist2) * push;
+        var col = box.userData.col;
+        var oldX1 = col.x1, oldZ1 = col.z1, oldX2 = col.x2, oldZ2 = col.z2;
+        col.x1 = nx - sz; col.z1 = nz - sz;
+        col.x2 = nx + sz; col.z2 = nz + sz;
+        var collide = false;
+        for(var ci = 0; ci < colliders.length; ci++){
+          if(colliders[ci] === col) continue;
+          var c2 = colliders[ci];
+          if(col.x1 < c2.x2 && col.x2 > c2.x1 && col.z1 < c2.z2 && col.z2 > c2.z1){
+            collide = true; break;
+          }
+        }
+        if(!collide){
+          box.position.x = nx;
+          box.position.z = nz;
+        } else {
+          col.x1 = oldX1; col.z1 = oldZ1;
+          col.x2 = oldX2; col.z2 = oldZ2;
+        }
+        checkPlates();
+      }
     }
   }
 
-  // --- проверка открытия двери по ключу ---
+  // --- открытие двери по ключу ---
   for(var m = 0; m < dynamicObjs.length; m++){
     var dd = dynamicObjs[m];
     if(dd.type !== 'door') continue;
     var doorData = dd.data;
     if(doorData.open || doorData.finished) continue;
     if(!doorData.needsKey) continue;
-    var dist = Math.hypot(player.x - doorData.x, player.z - doorData.z);
-    if(dist < 2.4 && inventory.keys[doorData.keyId]){
+    var distK = Math.hypot(player.x - doorData.x, player.z - doorData.z);
+    if(distK < 2.4 && inventory.keys[doorData.keyId]){
       doorData.open = true;
       var idx2 = colliders.indexOf(doorData.collider);
       if(idx2 >= 0) colliders.splice(idx2, 1);
       beep(90, 0.5, 0.09);
       showMsg('Дверь открывается...', 1.4, 'good');
-    } else if(dist < 2.4 && !inventory.keys[doorData.keyId]){
+    } else if(distK < 2.4 && !inventory.keys[doorData.keyId]){
       if(timeAcc - (doorData.lastMsg || 0) > 2){
         doorData.lastMsg = timeAcc;
         showMsg('🔒 Заперто. Нужен ключ.', 1.4, 'warn');
@@ -1926,6 +2426,25 @@ function update(dt){
       }
     }
   }
+
+  // --- дверь уровня 11 (по таймеру) ---
+  if(level === 11 && l11DoorRef && !l11DoorRef.open && l11Active){
+    var dd11 = Math.hypot(player.x - l11DoorRef.x, player.z - l11DoorRef.z);
+    if(dd11 < 2.5){
+      l11Active = false;
+      l11DoorRef.open = true;
+      var idx11 = colliders.indexOf(l11DoorRef.collider);
+      if(idx11 >= 0) colliders.splice(idx11, 1);
+      beep(90, 0.5, 0.09);
+      showMsg('✅ Успел!', 1.5, 'good');
+    }
+  }
+
+  // --- спец-механики ---
+  checkSymbolTreads();
+  updateTimer11(dt);
+  updateLasers(dt);
+  updateMonster(dt);
 }
 
 /* =========================================================
@@ -1968,525 +2487,106 @@ document.getElementById('hint').addEventListener('click', function(){
 
 setCtrlMode(ctrlMode);
 
-// заставка
-setTimeout(function(){
-  var sp = document.getElementById('splash');
-  if(!sp) return;
-  sp.classList.add('hide');
-  setTimeout(function(){ sp.style.display = 'none'; }, 1100);
-}, 2600);
-
 /* =========================================================
-   УРОВНИ 7-15
+   ФИНАЛ
    ========================================================= */
-
-// -------- УРОВЕНЬ 7: скрытая стена --------
-function level7(){
-  currentLevel = { id: 7 };
-  ambient.intensity = 0.3;
-  hemi.intensity = 0.2;
-  torch.intensity = 0.9; torch.color.set(0x88a0c0);
-  flashLight.color.set(0xfff0cc);
-  scene.background.set(0x080810);
-  scene.fog.color.set(0x080810);
-  scene.fog.near = 4; scene.fog.far = 28;
-
-  addRoom(24, 24, 3.2, 0, 0, { kind:'stone', tint:0x999999, floorKind:'stone', floorTint:0x666666 });
-
-  // Настоящая стена-препятствие
-  addBox(0, 1.6, 0, 12, 3.2, 0.6, 'stone', 0xaaaaaa);
-  addBox(-9, 1.6, -6, 0.6, 3.2, 12, 'stone', 0xaaaaaa);
-  addBox( 9, 1.6,  6, 0.6, 3.2, 12, 'stone', 0xaaaaaa);
-
-  // ЛОЖНАЯ стена (без коллайдера) — за ней ключ
-  var fakeWall = new THREE.Mesh(
-    new THREE.BoxGeometry(4, 3.2, 0.5),
-    makeMat('stone', 0xa8a8a8, 1.5)
-  );
-  scaleTexOn(fakeWall.material, 4, 3.2);
-  fakeWall.position.set(0, 1.6, -6);
-  world.add(fakeWall);
-
-  // Ключ за ложной стеной
-  addKey(0, 0.6, -9, 'k7');
-
-  // Немного декора
-  addDecal(0, 2.6, -5.9, 3, 1, '#6a6a6a', '?');
-
-  addBattery(8, 0.4, 8);
-  addBattery(-8, 0.4, 8);
-
-  var d = addDoor(0, -12, { needsKey:true, keyId:'k7', onOpen: function(){ nextLevel(); } });
-
-  setTask('Найди проход. Не все стены — стены.');
-
-  player.x = 0; player.z = 10; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 8: плиты давления + груз --------
-var l8Plates = [];
-var l8Pressed = 0;
-var l8Needed = 3;
-function level8(){
-  currentLevel = { id: 8 };
-  ambient.intensity = 0.4;
-  torch.intensity = 1.0; torch.color.set(0xffd0a0);
-  scene.background.set(0x0e0e16);
-  scene.fog.color.set(0x0e0e16);
-  scene.fog.near = 6; scene.fog.far = 34;
-
-  addRoom(26, 26, 3.4, 0, 0, { kind:'concrete', tint:0xbbbbbb, floorKind:'tile', floorTint:0x888890 });
-
-  // 3 плиты давления — нужно положить ящик на каждую
-  l8Plates = [];
-  l8Pressed = 0;
-  l8Needed = 3;
-
-  var plPos = [[-8, 0, -8], [8, 0, -8], [0, 0, 8]];
-  for(var i = 0; i < 3; i++){
-    var plate = makePressurePlate(plPos[i][0], plPos[i][1], plPos[i][2], 'p' + i);
-    l8Plates.push(plate);
-  }
-
-  // Ящики-грузы рядом
-  makePushBox(-4, 0, -8, 0.9);
-  makePushBox( 4, 0, -8, 0.9);
-  makePushBox( 0, 0,  4, 0.9);
-  makePushBox(-10, 0, -8, 0.9); // лишний
-  makePushBox( 10, 0,  8, 0.9); // лишний
-
-  addBattery(-12, 0.4, 0);
-
-  var d = addDoor(0, -13, { needsKey:false, onOpen: function(){ nextLevel(); } });
-
-  setTask('Поставь ящики на 3 плиты');
-
-  player.x = 0; player.z = 11; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 9: символы на стенах --------
-var l9Symbols = ['★', '☾', '▲', '♥'];
-var l9Order = [];
-var l9Progress = 0;
-function level9(){
-  currentLevel = { id: 9 };
-  ambient.intensity = 0.35;
-  torch.intensity = 0.9; torch.color.set(0xc0a090);
-  scene.background.set(0x0a0a12);
-  scene.fog.color.set(0x0a0a12);
-  scene.fog.near = 5; scene.fog.far = 30;
-
-  addRoom(22, 22, 3.2, 0, 0, { kind:'brick', tint:0xc0c0c0, floorKind:'wood', floorTint:0x7a5a3a });
-
-  // Символы-кнопки на полу в разброс
-  l9Order = [0, 2, 3, 1]; // ★ ▲ ♥ ☾
-  l9Progress = 0;
-
-  var positions = [[-6, -6], [6, -6], [-6, 6], [6, 6]];
-  for(var i = 0; i < 4; i++){
-    makeSymbolButton(positions[i][0], 0.04, positions[i][1], l9Symbols[i], i);
-  }
-
-  // Подсказка на стене — порядок символов
-  addDecal(0, 2.2, -10.9, 6, 1.2, '#ffcc44', '★  ▲  ♥  ☾');
-
-  addBattery(0, 0.4, -8);
-
-  var d = addDoor(0, -11, { needsKey:false, onOpen: function(){ nextLevel(); } });
-
-  setTask('Наступи на символы в порядке: ★ ▲ ♥ ☾');
-
-  player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 10: код на двери --------
-var l10Code = [3, 1, 4, 1, 5];  // 31415
-var l10Input = [];
-function level10(){
-  currentLevel = { id: 10 };
-  ambient.intensity = 0.4;
-  torch.intensity = 1.0; torch.color.set(0xffd0a0);
-  scene.background.set(0x0e0e18);
-  scene.fog.color.set(0x0e0e18);
-  scene.fog.near = 6; scene.fog.far = 32;
-
-  addRoom(24, 24, 3.4, 0, 0, { kind:'metal', tint:0xa0a0b0, floorKind:'tile', floorTint:0x707080 });
-
-  // Цифровые кнопки (1-9) на стене
-  l10Input = [];
-  var numPositions = [
-    [4.5, 2.4, -11.4], [5.5, 2.4, -11.4], [6.5, 2.4, -11.4],
-    [4.5, 1.6, -11.4], [5.5, 1.6, -11.4], [6.5, 1.6, -11.4],
-    [4.5, 0.8, -11.4], [5.5, 0.8, -11.4], [6.5, 0.8, -11.4]
-  ];
-  for(var i = 0; i < 9; i++){
-    makeNumberButton(numPositions[i][0], numPositions[i][1], numPositions[i][2], i + 1);
-  }
-
-  // Дисплей-подсказка
-  addDecal(0, 2.2, -11.3, 3, 0.8, '#44ff44', 'ЧИСЛО ПИ');
-
-  addBattery(8, 0.4, 8);
-  addBattery(-8, 0.4, 8);
-
-  var d = addDoor(0, -11.5, { needsKey:false, onOpen: function(){ nextLevel(); } });
-  // Но дверь не откроется сама — только после правильного кода
-
-  setTask('Введи число π (5 цифр после точки вперёд): 3 1 4 1 5');
-
-  player.x = 0; player.z = 8; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 11: успей добежать --------
-var l11Timer = 0;
-var l11Active = false;
-var l11DoorRef = null;
-function level11(){
-  currentLevel = { id: 11 };
-  ambient.intensity = 0.35;
-  torch.intensity = 0.9; torch.color.set(0xffaa80);
-  scene.background.set(0x0a0810);
-  scene.fog.color.set(0x0a0810);
-  scene.fog.near = 5; scene.fog.far = 30;
-
-  addRoom(28, 28, 3.4, 0, 0, { kind:'rust', tint:0xb0b0b0, floorKind:'metal', floorTint:0x808088 });
-
-  // Рычаг у входа
-  addLever(0, 0.0, 10, 'timer');
-
-  // Дверь у противоположной стены
-  l11DoorRef = addDoor(0, -13, { needsKey:false, onOpen: function(){ nextLevel(); } });
-
-  // Препятствия
-  addBox(-4, 1.6, 0, 0.6, 3.4, 4, 'rust', 0xaaaaaa);
-  addBox( 4, 1.6, 0, 0.6, 3.4, 4, 'rust', 0xaaaaaa);
-  addBox( 0, 1.6, -5, 6, 3.4, 0.6, 'rust', 0xaaaaaa);
-
-  // декор
-  addDecal(0, 2.4, -12.9, 5, 1, '#ff3333', '10 СЕКУНД');
-
-  l11Timer = 0;
-  l11Active = false;
-
-  setTask('Дёрни рычаг → беги к двери за 10 секунд');
-
-  player.x = 0; player.z = 11; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 12: движущиеся лазеры --------
-var l12Lasers = [];
-function level12(){
-  currentLevel = { id: 12 };
-  ambient.intensity = 0.15;
-  hemi.intensity = 0.1;
-  torch.intensity = 0.6; torch.color.set(0xff4040);
-  scene.background.set(0x080808);
-  scene.fog.color.set(0x080808);
-  scene.fog.near = 3; scene.fog.far = 25;
-
-  addRoom(28, 28, 3.4, 0, 0, { kind:'metal', tint:0x888888, floorKind:'metal', floorTint:0x707080 });
-
-  // Движущиеся "лазерные" барьеры (красные светящиеся цилиндры)
-  l12Lasers = [];
-
-  // горизонтальные (вдоль X) — движутся вдоль Z
-  for(var i = 0; i < 3; i++){
-    var laser = makeMovingLaser(0, 1.0 + i * 0.7, -8 + i * 6, 'x', 10, 1.5 + i * 0.4, i * 1.7);
-    l12Lasers.push(laser);
-  }
-  // вертикальные (вдоль Z) — движутся вдоль X
-  for(var j = 0; j < 2; j++){
-    var laser2 = makeMovingLaser(-8 + j * 8, 1.6, 0, 'z', 12, 1.0 + j * 0.3, j * 2.5 + 1);
-    l12Lasers.push(laser2);
-  }
-
-  addBattery(0, 0.4, 10);
-
-  var d = addDoor(0, -14, { needsKey:false, onOpen: function(){ nextLevel(); } });
-
-  setTask('Пройти через лазеры — не задень их');
-
-  player.x = 0; player.z = 12; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 13: два ключа — две двери --------
-function level13(){
-  currentLevel = { id: 13 };
-  ambient.intensity = 0.4;
-  torch.intensity = 1.0; torch.color.set(0xffe0b0);
-  scene.background.set(0x0a0a14);
-  scene.fog.color.set(0x0a0a14);
-  scene.fog.near = 6; scene.fog.far = 36;
-
-  addRoom(30, 30, 3.4, 0, 0, { kind:'brick', tint:0xcccccc, floorKind:'wood', floorTint:0x7a5a3a });
-
-  // Внутренняя комната с первым ключом
-  addBox(-5, 1.7, 0, 0.4, 3.4, 12, 'brick', 0xbbbbbb);
-  addBox( 5, 1.7, 0, 0.4, 3.4, 12, 'brick', 0xbbbbbb);
-  addBox( 0, 1.7, -6, 10, 3.4, 0.4, 'brick', 0xbbbbbb);
-  // проход внутрь — с юга, снизу
-
-  addKey(-8, 0.6, -10, 'k13a');
-  addKey( 9, 0.6,  9, 'k13b');
-
-  // Первая дверь — в маленькой комнате
-  var d1 = addDoor(0, -13, { needsKey:true, keyId:'k13a', onOpen: function(){
-    showMsg('Первая дверь открыта. Найди второй ключ!', 2.2, 'good');
-  }});
-
-  // Вторая дверь — за первой (внутри)
-  var d2 = addDoor(-8, -5.5, { needsKey:true, keyId:'k13b', onOpen: function(){ nextLevel(); } });
-
-  addBattery(0, 0.4, 10);
-
-  setTask('Найди 2 ключа и открой 2 двери');
-
-  player.x = 0; player.z = 12; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 14: погоня (тень-монстр) --------
-var l14Monster = null;
-var l14MonsterSpeed = 2.4;
-function level14(){
-  currentLevel = { id: 14 };
-  ambient.intensity = 0.12;
-  hemi.intensity = 0.08;
-  torch.intensity = 0.4; torch.color.set(0xff2020);
-  scene.background.set(0x050005);
-  scene.fog.color.set(0x050005);
-  scene.fog.near = 2; scene.fog.far = 16;
-
-  addRoom(34, 34, 3.6, 0, 0, { kind:'blood', tint:0x909090, floorKind:'stone', floorTint:0x606060 });
-
-  // Лабиринт-препятствия для побега
-  var walls = [
-    [-6, -6, 8, 0.6], [6, -6, 8, 0.6],
-    [-6, 6, 8, 0.6], [6, 6, 8, 0.6],
-    [0, -10, 0.6, 6], [0, 10, 0.6, 6],
-    [-12, 0, 0.6, 6], [12, 0, 0.6, 6]
-  ];
-  for(var i = 0; i < walls.length; i++){
-    addBox(walls[i][0], 1.8, walls[i][1], walls[i][2], 3.6, walls[i][3], 'blood', 0x999999);
-  }
-
-  // Ключ у выхода
-  addKey(0, 0.6, -15, 'k14');
-
-  // Дверь
-  var d = addDoor(0, -16.5, { needsKey:true, keyId:'k14', onOpen: function(){ nextLevel(); } });
-
-  // Тень-монстр
-  l14Monster = makeShadowMonster(15, 0, 15);
-  l14MonsterSpeed = 2.4;
-
-  setTask('НАЙДИ КЛЮЧ! Тень уже идёт за тобой!');
-  showMsg('⚠ ОНО ПРОСНУЛОСЬ', 2.5, 'bad');
-
-  addBattery(-14, 0.4, 14);
-  addBattery(14, 0.4, -14);
-
-  player.x = 0; player.z = 14; player.y = 0; player.yaw = 0; player.pitch = 0;
-}
-
-// -------- УРОВЕНЬ 15: финальная комната --------
-function level15(){
-  currentLevel = { id: 15 };
-  ambient.intensity = 0.08;
-  hemi.intensity = 0.05;
-  torch.intensity = 0.3; torch.color.set(0xff1010);
-  flashLight.color.set(0xffc0c0);
-  scene.background.set(0x030003);
-  scene.fog.color.set(0x030003);
-  scene.fog.near = 1.5; scene.fog.far = 12;
-
-  addRoom(8, 30, 3.0, 0, 0, { kind:'blood', tint:0x909090, floorKind:'stone', floorTint:0x505050 });
-
-  // Кровавые надписи
-  addDecal(0, 2.0, -14.9, 6, 1.2, '#8b0000', 'БЕГИ');
-  addDecal(0, 2.0, 14.9, 6, 1.2, '#8b0000', 'ОН УЖЕ ЗДЕСЬ');
-
-  // Тусклые лампы
-  for(var z = 10; z > -12; z -= 6){
-    var l = new THREE.PointLight(0xff3030, 0.5, 8, 2);
-    l.position.set(0, 2.6, z);
-    world.add(l);
-  }
-
-  // Финальная дверь
-  var d = addDoor(0, -13.5, {
-    needsKey:false,
-    auto:true,
-    tint:0x5e1212,
-    onOpen: function(){
-      // запускаем финал
-      setTimeout(startEnding, 500);
+function startEnding(){
+  if(state === 'ending' || state === 'crash') return;
+  state = 'ending';
+
+  if(document.pointerLockElement) document.exitPointerLock();
+  clearTimeout(dripTimerId);
+  clearTimeout(creepTimerId);
+
+  screech();
+  document.getElementById('scare').classList.add('on');
+
+  var barTimer = setInterval(function(){
+    for(var i = 0; i < 3; i++){
+      var b = document.createElement('div');
+      b.className = 'glitchbar';
+      b.style.top = (Math.random() * 100) + '%';
+      b.style.height = (2 + Math.random() * 14) + 'px';
+      b.style.background = Math.random() < 0.5 ? '#fff' :
+                          (Math.random() < 0.5 ? '#ff0000' : '#00ffff');
+      b.style.opacity = 0.15 + Math.random() * 0.4;
+      document.body.appendChild(b);
+      (function(el){
+        setTimeout(function(){ if(el.parentNode) el.parentNode.removeChild(el); },
+          60 + Math.random() * 140);
+      })(b);
     }
-  });
+  }, 70);
 
-  setTask('Иди к двери...');
-
-  player.x = 0; player.z = 12; player.y = 0; player.yaw = 0; player.pitch = 0;
+  var t = 15;
+  document.getElementById('count').textContent = t;
+  var iv = setInterval(function(){
+    t--;
+    document.getElementById('count').textContent = t > 0 ? t : 0;
+    if(t > 0){
+      beep(880, 0.05, 0.12);
+      if(droneNodes && droneNodes.g && actx){
+        droneNodes.g.gain.setTargetAtTime(0.03 + (15 - t) * 0.008, actx.currentTime, 0.2);
+      }
+    } else {
+      clearInterval(iv);
+      clearInterval(barTimer);
+      crash();
+    }
+  }, 1000);
 }
 
-/* =========================================================
-   НОВЫЕ ХЕЛПЕРЫ ДЛЯ УРОВНЕЙ 7-15
-   ========================================================= */
+function crash(){
+  if(state === 'crash') return;
+  state = 'crash';
 
-// Плита давления — активируется, когда на ней лежит ящик
-function makePressurePlate(x, y, z, id){
-  var g = new THREE.Group();
-  var base = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 0.08, 1.2),
-    new THREE.MeshStandardMaterial({ color: 0x333338, roughness: 0.6, metalness: 0.5 })
-  );
-  g.add(base);
-  var top = new THREE.Mesh(
-    new THREE.BoxGeometry(1.0, 0.06, 1.0),
-    new THREE.MeshStandardMaterial({ color: 0xff4422, emissive: 0x551100, emissiveIntensity: 0.5, roughness: 0.4 })
-  );
-  top.position.y = 0.05;
-  g.add(top);
-  g.position.set(x, y, z);
-  g.userData = { type:'plate', id:id, top:top, pressed:false, x:x, z:z };
-  world.add(g);
-  return g;
+  if(document.pointerLockElement) document.exitPointerLock();
+  try {
+    if(droneNodes){ droneNodes.o1.stop(); droneNodes.o2.stop(); }
+    if(actx) actx.close();
+  } catch(e){}
+
+  try { renderer.forceContextLoss(); } catch(e){}
+  try { renderer.dispose(); } catch(e){}
+
+  var scare = document.getElementById('scare');
+  if(scare) scare.classList.remove('on');
+
+  document.body.innerHTML = '';
+
+  var crashDiv = document.createElement('div');
+  crashDiv.id = 'crash';
+  crashDiv.textContent =
+    'FATAL ERROR 0x000000FF\n' +
+    'MEMORY CORRUPTED\n' +
+    'STACK: 0xDEADBEEF 0xC0000005 0x00000000\n' +
+    'DISK C:\\  ...  ACCESS DENIED\n' +
+    'DATA DESTRUCTION IN PROGRESS...\n' +
+    '...\n' +
+    '...\n' +
+    'CONNECTION LOST\n';
+  document.body.appendChild(crashDiv);
+
+  for(var i = 0; i < 45; i++){
+    var b = document.createElement('div');
+    b.className = 'glitchbar';
+    b.style.top = (Math.random() * 100) + '%';
+    b.style.height = (1 + Math.random() * 9) + 'px';
+    b.style.background = Math.random() < 0.5 ? '#ffffff' :
+                        (Math.random() < 0.5 ? '#ff0000' : '#00ffff');
+    b.style.opacity = 0.04 + Math.random() * 0.3;
+    document.body.appendChild(b);
+  }
+
+  setTimeout(function(){
+    var h = document.createElement('div');
+    h.id = 'hang';
+    h.innerHTML = '<span class="spin">◌</span>Страница не отвечает';
+    document.body.appendChild(h);
+  }, 1400);
 }
 
-// Толкаемый ящик — его можно толкать телом, если стоять рядом и идти в его сторону
-function makePushBox(x, y, z, size){
-  var mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(size * 2, size * 2, size * 2),
-    makeMat('wood', 0x9a7a5a, 1.0)
-  );
-  scaleTexOn(mesh.material, size * 2, size * 2);
-  mesh.position.set(x, y + size, z);
-  if(SHADOWS){ mesh.castShadow = true; mesh.receiveShadow = true; }
-  world.add(mesh);
-  addCollider(x, z, size * 2, size * 2, y + size * 2);
-  mesh.userData = { type:'pushbox', size:size, col: colliders[colliders.length - 1] };
-  // добавим в динамические
-  dynamicObjs.push({ type:'pushbox', data: mesh });
-  return mesh;
-}
-
-// Кнопка-символ (можно наступить)
-function makeSymbolButton(x, y, z, symbol, idx){
-  var g = new THREE.Group();
-  var base = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.5, 0.55, 0.06, 24),
-    new THREE.MeshStandardMaterial({ color: 0x222226, roughness: 0.6, metalness: 0.4 })
-  );
-  g.add(base);
-  // символ через canvas
-  var c = document.createElement('canvas');
-  c.width = c.height = 128;
-  var ctx = c.getContext('2d');
-  ctx.fillStyle = '#111';
-  ctx.fillRect(0, 0, 128, 128);
-  ctx.fillStyle = '#ffcc44';
-  ctx.font = 'bold 90px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(symbol, 64, 68);
-  var tex = new THREE.CanvasTexture(c);
-  var top = new THREE.Mesh(
-    new THREE.CircleGeometry(0.42, 24),
-    new THREE.MeshBasicMaterial({ map: tex })
-  );
-  top.rotation.x = -Math.PI / 2;
-  top.position.y = 0.035;
-  g.add(top);
-  g.position.set(x, y, z);
-  g.userData = { type:'symbtn', id:idx, symbol:symbol, pressed:false, top:top };
-  world.add(g);
-  interactables.push(g);
-  return g;
-}
-
-// Кнопка-цифра на стене
-function makeNumberButton(x, y, z, num){
-  var g = new THREE.Group();
-  var base = new THREE.Mesh(
-    new THREE.BoxGeometry(0.55, 0.55, 0.1),
-    new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.5, metalness: 0.6 })
-  );
-  g.add(base);
-  var c = document.createElement('canvas');
-  c.width = c.height = 128;
-  var ctx = c.getContext('2d');
-  ctx.fillStyle = '#111';
-  ctx.fillRect(0, 0, 128, 128);
-  ctx.fillStyle = '#44ff44';
-  ctx.font = 'bold 96px Arial';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(String(num), 64, 68);
-  var tex = new THREE.CanvasTexture(c);
-  var face = new THREE.Mesh(
-    new THREE.PlaneGeometry(0.5, 0.5),
-    new THREE.MeshBasicMaterial({ map: tex })
-  );
-  face.position.z = 0.051;
-  g.add(face);
-  g.position.set(x, y, z);
-  g.rotation.y = 0;
-  g.userData = { type:'numbtn', num:num, base:base };
-  world.add(g);
-  interactables.push(g);
-  return g;
-}
-
-// Движущийся лазер
-function makeMovingLaser(x, y, z, axis, range, speed, phase){
-  var geo = axis === 'x'
-    ? new THREE.BoxGeometry(range * 2, 0.06, 0.06)
-    : new THREE.BoxGeometry(0.06, 0.06, range * 2);
-
-  var mat = new THREE.MeshBasicMaterial({ color: 0xff2222 });
-  var mesh = new THREE.Mesh(geo, mat);
-  mesh.position.set(x, y, z);
-  world.add(mesh);
-
-  // светящийся оттенок
-  var glow = new THREE.Mesh(
-    geo.clone(),
-    new THREE.MeshBasicMaterial({ color: 0xff6666, transparent: true, opacity: 0.35 })
-  );
-  glow.position.copy(mesh.position);
-  world.add(glow);
-
-  var laser = { mesh: mesh, glow: glow, axis: axis, range: range, speed: speed, phase: phase,
-    baseX: x, baseZ: z, offsetAxis: axis === 'x' ? 'z' : 'x' };
-  dynamicObjs.push({ type:'laser', data: laser });
-  return laser;
-}
-
-// Тень-монстр
-function makeShadowMonster(x, y, z){
-  var g = new THREE.Group();
-  var mat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.85 });
-  var body = new THREE.Mesh(new THREE.SphereGeometry(0.7, 16, 14), mat);
-  body.scale.set(1, 1.6, 1);
-  body.position.y = 1.1;
-  g.add(body);
-  var head = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 14), mat);
-  head.position.y = 2.1;
-  g.add(head);
-  // глаза
-  var eyeMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
-  var eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), eyeMat);
-  eyeL.position.set(-0.15, 2.2, 0.4);
-  g.add(eyeL);
-  var eyeR = eyeL.clone();
-  eyeR.position.x = 0.15;
-  g.add(eyeR);
-  // аура
-  var aura = new THREE.PointLight(0x220000, 0.6, 6, 2);
-  aura.position.y = 1.5;
-  g.add(aura);
-
-  g.position.set(x, y, z);
-  g.userData = { type: 'monster' };
-  world.add(g);
-  return g;
-}
+})();
+</script>
+</body>
+</html>
